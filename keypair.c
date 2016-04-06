@@ -2,9 +2,7 @@
 #include <stdio.h>
 #include <sodium.h>
 
-#include "util.h"
-
-int 
+int
 main(int argc, char **argv)
 {
 	unsigned char	sk[crypto_box_SECRETKEYBYTES];
@@ -18,8 +16,10 @@ main(int argc, char **argv)
 		printf("usage: %s <name>\n", basename(argv[0]));
 		return EXIT_FAILURE;
 	}
-	sodium_init();
-
+	if (sodium_init() == -1) {
+		printf("failed to initialize crypto library.\n");
+		return EXIT_FAILURE;;
+	}
 	crypto_box_keypair(pk, sk);
 
 	snprintf(key_fname, sizeof(key_fname), "%s.keypair", argv[1]);

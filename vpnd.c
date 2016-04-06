@@ -1,14 +1,24 @@
-#include <sys/event.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/event.h>
+#include <sys/uio.h>
 
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
-
+#include <net/if.h>
+#ifdef __FreeBSD__
+#include <net/if_tun.h>
+#elif __DragonFly__
+#include <net/tun/if_tun.h>
+#endif
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <inttypes.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -21,29 +31,84 @@
 #include <sodium.h>
 
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
+#define KEY_MAX_PACKET_COUNT 1000000
+#define KEY_MAX_AGE_SECS 60
+#define PEER_MAX_HEARTBEAT_INTERVAL_SECS 20
 
-/* FSM states */
+/* VPN states */
 typedef enum {
 	INIT,
 	KEY_NONE,
 	KEY_STARTING,
-	KEY_OK,
+	ACTIVE,
 	KEY_STALE,
 	KEY_SWITCHING,
+	VPN_STATE_LAST_PLUS_ONE,
 }		vpn_state;
+
+const char     *vpn_state_string_array[VPN_STATE_LAST_PLUS_ONE] =
+{
+	"INIT",
+	"KEY_NONE",
+	"KEY_STARTING",
+	"ACTIVE",
+	"KEY_STALE",
+	"KEY_SWITCHING",
+};
+
+#define VPN_STATE_STR(state) \
+	(((state) >= VPN_STATE_LAST_PLUS_ONE) \
+	    ? "UNKNOWN" : vpn_state_string_array[(state)])
+
+/* VPN peer role */
+typedef enum {
+	NONE,
+	INITIATOR,
+	RESPONDER,
+	VPN_ROLE_LAST_PLUS_ONE,
+}		vpn_role;
+
+const char     *vpn_role_string_array[VPN_ROLE_LAST_PLUS_ONE] =
+{
+	"NO ROLE",
+	"INITIATOR",
+	"RESPONDER",
+};
+
+#define VPN_ROLE_STR(role) \
+	(((role) >= VPN_ROLE_LAST_PLUS_ONE) \
+	    ? "UNKNOWN" : vpn_role_string_array[(role)])
 
 /* message types exchanged between peers */
 typedef enum {
-	PEER_START,
+	PEER_ID,
 	KEY_INIT_START,
 	KEY_INIT_ACK,
 	KEY_INIT_DONE,
-	DEBUG_STRING,
 	KEY_SWITCH_START,
 	KEY_SWITCH_ACK,
 	KEY_SWITCH_DONE,
+	DEBUG_STRING,
 	DATA,
+	MSG_TYPE_LAST_PLUS_ONE,
 }		message_type;
+
+const char     *message_type_string_array[MSG_TYPE_LAST_PLUS_ONE] =
+{
+	"PEER_ID",
+	"KEY_INIT_START",
+	"KEY_INIT_ACK",
+	"KEY_INIT_DONE",
+	"KEY_SWITCH_START",
+	"KEY_SWITCH_ACK",
+	"KEY_SWITCH_DONE",
+	"DEBUG_STRING",
+	"DATA",
+};
+
+#define MSG_TYPE_STR(type) \
+	(((type) >= MSG_TYPE_LAST_PLUS_ONE) \
+	    ? "UNKNOWN" : message_type_string_array[(type)])
 
 /* Timers used for retransmits and expiry */
 typedef enum {
@@ -52,8 +117,23 @@ typedef enum {
 	RETRANSMIT_KEY_INIT_ACK,
 	RETRANSMIT_KEY_SWITCH_START,
 	RETRANSMIT_KEY_SWITCH_ACK,
-	KEY_EXPIRY,
+	ACTIVE_HEARTBEAT,
+	TIMER_TYPE_LAST_PLUS_ONE,
 }		timer_type;
+
+const char     *timer_type_string_array[TIMER_TYPE_LAST_PLUS_ONE] =
+{
+	"RETRANSMIT_PEER_INIT",
+	"RETRANSMIT_KEY_INIT_START",
+	"RETRANSMIT_KEY_INIT_ACK",
+	"RETRANSMIT_KEY_SWITCH_START",
+	"RETRANSMIT_KEY_SWITCH_ACK",
+	"ACTIVE_HEARTBEAT",
+};
+
+#define TIMER_TYPE_STR(type) \
+	(((type) >= TIMER_TYPE_LAST_PLUS_ONE) \
+	    ? "UNKNOWN" : timer_type_string_array[(type)])
 
 struct config_param {
 	char           *desc;
@@ -66,53 +146,118 @@ struct config_param {
 
 #define PAYLOAD_SZ 1400
 /* Message data structure definitions */
-struct message {
-	message_type	type;
-	union {
-		uint32_t	init_random;
-		unsigned char	dh_pk[crypto_box_PUBLICKEYBYTES];
-		unsigned char	data[PAYLOAD_SZ];
-	};
+struct vpn_payload {
+	unsigned char	type;
+	unsigned char	data[PAYLOAD_SZ];
 };
 
 /* Finite state machine state data. */
-struct vpn_fsm {
+struct vpn_state {
 	vpn_state	state;
-	uint32_t	r;
-	unsigned char	dh_sk[crypto_box_SECRETKEYBYTES];
-	unsigned char	dh_pk[crypto_box_PUBLICKEYBYTES];
-	unsigned char	cur_key[crypto_box_BEFORENMBYTES];
-	unsigned char	new_key[crypto_box_BEFORENMBYTES];
+	vpn_role	role;
+	uint32_t	peer_id;
+	uint32_t	remote_peer_id;
+	unsigned char	orig_shared_key[crypto_box_BEFORENMBYTES];
+	unsigned char	cur_shared_key[crypto_box_BEFORENMBYTES];
+	struct timespec	key_start_ts;
+	struct timespec	sess_start_ts;
+	struct timespec	sess_end_ts;
+	time_t		sess_active_secs;
+	time_t		inactive_secs;
+	struct timespec	peer_last_heartbeat_ts;
+	uint32_t	key_sent_packet_count;
+	unsigned char	new_secret_key[crypto_box_SECRETKEYBYTES];
+	unsigned char	new_public_key[crypto_box_PUBLICKEYBYTES];
+	unsigned char	new_shared_key[crypto_box_BEFORENMBYTES];
 	unsigned char	nonce[crypto_box_NONCEBYTES];
-	int		s;
+	unsigned char	remote_nonce[crypto_box_NONCEBYTES];
+	int		ext_sock;
+	int		ctrl_sock;
+	struct kevent	kev_changes[5];
+	uint32_t	kev_change_count;
+	uint32_t	rx_packets;
+	uint32_t	tx_packets;
+	uint32_t	peer_init_retransmits;
+	uint32_t	key_init_start_retransmits;
+	uint32_t	key_init_ack_retransmits;
+	uint32_t	key_switch_start_retransmits;
+	uint32_t	key_switch_ack_retransmits;
+	uint32_t	keys_used;
+	uint32_t	sess_starts;
+	bool		peer_died;
 };
 
 int		log_upto;
 bool		fflag = false;
 int		dflag = 0;
 void		log_msg   (int priority, const char *msg,...);
+char           *time_str(time_t time, char *time_str, size_t len);
 char           *get_value(char *line, size_t len);
-bool		init      (char *config_fname, struct vpn_fsm *fsm);
-void		sock_input(struct vpn_fsm *fsm);
-void		expire_timer(struct vpn_fsm *fsm, struct kevent *kev);
-void		dump_state(struct vpn_fsm *fsm);
-bool		run       (struct vpn_fsm *fsm);
+bool		init      (bool fflag, char *config_fname, struct vpn_state *vpn);
+void		start_protocol(struct vpn_state *vpn);
+void		change_state(struct vpn_state *vpn, vpn_state new_state);
+void		log_invalid_msg_for_role(struct vpn_state *vpn, message_type msg_type);
+void		log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type);
+void		log_retransmit(struct vpn_state *vpn, message_type msg_type);
+void		add_timer (struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval);
+bool		tx_encrypted(struct vpn_state *vpn, struct vpn_payload *payload, size_t data_len);
+void		tx_peer_id(struct vpn_state *vpn);
+void		tx_new_public_key(struct vpn_state *vpn);
+void		tx_key_init_done(struct vpn_state *vpn);
+void		process_peer_id(struct vpn_state *vpn, unsigned char *data);
+void		process_key_init_start(struct vpn_state *vpn, unsigned char *data);
+void		process_key_init_ack(struct vpn_state *vpn, unsigned char *data);
+void		process_key_init_done(struct vpn_state *vpn, unsigned char *data);
+void		process_key_switch_start(struct vpn_state *vpn, unsigned char *data);
+void		process_key_switch_ack(struct vpn_state *vpn, unsigned char *data);
+void		process_key_switch_done(struct vpn_state *vpn, unsigned char *data);
+void		process_rx_data(struct vpn_state *vpn, unsigned char *data, size_t data_len);
+void		ext_sock_input(struct vpn_state *vpn);
+void		ctrl_sock_input(struct vpn_state *vpn);
+void		stdin_input(struct vpn_state *vpn);
+bool		dead_peer_restart(struct vpn_state *vpn, struct timespec now);
+void		process_timeout(struct vpn_state *vpn, struct kevent *kev);
+void		log_state (struct vpn_state *vpn);
+bool		run       (struct vpn_state *vpn);
 
 void
 log_msg(int priority, const char *msg,...)
 {
 	va_list		ap;
+	time_t		now;
+	struct tm	now_tm;
+	char		timestamp_str[32];
+	char		msg_str   [256];
 
 	va_start(ap, msg);
 	if (fflag) {
 		if (priority <= log_upto) {
-			vfprintf(stderr, msg, ap);
+			time(&now);
+			localtime_r(&now, &now_tm);
+			strftime(timestamp_str, sizeof(timestamp_str), "%c", &now_tm);
+			vsnprintf(msg_str, sizeof(msg_str), msg, ap);
+			fprintf(stderr, "%s %s", timestamp_str, msg_str);
 			fprintf(stderr, "\n");
 		}
 	} else {
 		vsyslog(priority, msg, ap);
 	}
 	va_end(ap);
+}
+
+char           *
+time_str(time_t time, char *time_str, size_t len)
+{
+	time_t		h      , m, s;
+
+	m = time / 60;
+	s = time % 60;
+	h = m / 60;
+	m = m % 60;
+	snprintf(time_str, len, "%ld:%02ld:%02ld", h, m, s);
+
+
+	return time_str;
 }
 
 char           *
@@ -176,17 +321,20 @@ get_addrinfo(struct addrinfo **addrinfo_p, char *host, char *port_str, char *inf
 			addr = &((struct sockaddr_in6 *)addrinfo->ai_addr)->sin6_addr;
 			port = ntohs(((struct sockaddr_in6 *)addrinfo->ai_addr)->sin6_port);
 			break;
+		default:
+			ok = false;
+			log_msg(LOG_ERR, "invalid address family: %d", addrinfo->ai_family);
 		}
-		inet_ntop(addrinfo->ai_family, addr,
-			  addr_str, addrinfo->ai_addrlen);
-
+	}
+	if (ok) {
+		inet_ntop(addrinfo->ai_family, addr, addr_str, addrinfo->ai_addrlen);
 		snprintf(info_str, info_str_sz, "%s:%u", addr_str, port);
 	}
 	return ok;
 }
 
 bool
-init(char *config_fname, struct vpn_fsm *fsm)
+init(bool fflag, char *config_fname, struct vpn_state *vpn)
 {
 	bool		ok = true;
 	FILE           *config_file;
@@ -217,6 +365,7 @@ init(char *config_fname, struct vpn_fsm *fsm)
 	char		local_info[INET6_ADDRSTRLEN + 7];
 	struct addrinfo *remote_addrinfo = NULL;
 	char		remote_info[INET6_ADDRSTRLEN + 7];
+	int		ioctl_data;
 
 	config_file = fopen(config_fname, "r");
 
@@ -249,6 +398,12 @@ init(char *config_fname, struct vpn_fsm *fsm)
 			}
 		}
 
+		if (ok) {
+			if (sodium_init() == -1) {
+				ok = false;
+				log_msg(LOG_ERR, "Failed to initialize crypto library");
+			}
+		}
 		/* Setup initial crypto box */
 		if (ok) {
 			if (sodium_hex2bin(local_sk_bin, sizeof(local_sk_bin),
@@ -267,12 +422,13 @@ init(char *config_fname, struct vpn_fsm *fsm)
 			}
 		}
 		if (ok) {
-			sodium_init();
-			bzero(fsm->nonce, sizeof(fsm->nonce));
-			if (crypto_box_beforenm(fsm->cur_key, remote_pk_bin,
+			if (crypto_box_beforenm(vpn->cur_shared_key, remote_pk_bin,
 						local_sk_bin) != 0) {
 				ok = false;
 				log_msg(LOG_ERR, "couldn't create shared key");
+			} else {
+				memcpy(vpn->orig_shared_key, vpn->cur_shared_key,
+				       sizeof(vpn->orig_shared_key));
 			}
 		}
 		/* Set up communication socket */
@@ -285,8 +441,8 @@ init(char *config_fname, struct vpn_fsm *fsm)
 				   remote_info, sizeof(remote_info), false);
 		}
 		if (ok) {
-			if ((fsm->s = socket(remote_addrinfo->ai_family,
-					     remote_addrinfo->ai_socktype,
+			if ((vpn->ext_sock = socket(remote_addrinfo->ai_family,
+					       remote_addrinfo->ai_socktype,
 				     remote_addrinfo->ai_protocol)) == -1) {
 				ok = false;
 				log_msg(LOG_ERR, "couldn't create socket: %s",
@@ -294,25 +450,77 @@ init(char *config_fname, struct vpn_fsm *fsm)
 			}
 		}
 		if (ok) {
-			if (bind(fsm->s, local_addrinfo->ai_addr,
+			if (bind(vpn->ext_sock, local_addrinfo->ai_addr,
 				 local_addrinfo->ai_addrlen) == -1) {
 				ok = false;
-				close(fsm->s);
+				close(vpn->ext_sock);
 				log_msg(LOG_ERR, "couldn't bind to %s: %s",
 					local_info, strerror(errno));
 			}
 		}
 		if (ok) {
-			if (connect(fsm->s, remote_addrinfo->ai_addr,
+			if (connect(vpn->ext_sock, remote_addrinfo->ai_addr,
 				    remote_addrinfo->ai_addrlen) < 0) {
 				ok = false;
-				close(fsm->s);
+				close(vpn->ext_sock);
 				log_msg(LOG_ERR, "couldn't connect to %s: %s",
 					remote_info, strerror(errno));
 			}
 		}
-		if (ok)
+		/* Set up control socket */
+		if (ok) {
+			vpn->ctrl_sock = open("/dev/tun0", O_RDWR);
+			if (vpn->ctrl_sock < 0) {
+				ok = false;
+				log_msg(LOG_ERR, "couldn't open tunnel: %s", strerror(errno));
+			}
+		}
+		if (ok) {
+			ioctl_data = IFF_POINTOPOINT;
+			if (ioctl(vpn->ctrl_sock, TUNSIFMODE, &ioctl_data) < 0) {
+				ok = false;
+				log_msg(LOG_ERR, "couldn't set tunnel in p-t-p mode: %s",
+					strerror(errno));
+			}
+		}
+		if (ok) {
+			ioctl_data = 0;
+			if (ioctl(vpn->ctrl_sock, TUNSIFHEAD, &ioctl_data) < 0) {
+				ok = false;
+				log_msg(LOG_ERR, "couldn't set tunnel in link-layer mode: %s",
+					strerror(errno));
+			}
+		}
+		if (ok) {
 			log_msg(LOG_NOTICE, "connected: %s <--> %s", local_info, remote_info);
+			EV_SET(&vpn->kev_changes[0], vpn->ext_sock,
+			       EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
+			vpn->kev_change_count = 1;
+			EV_SET(&vpn->kev_changes[1], vpn->ctrl_sock,
+			       EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
+			vpn->kev_change_count++;
+			EV_SET(&vpn->kev_changes[2], SIGUSR1,
+			       EVFILT_SIGNAL, EV_ADD | EV_ENABLE, 0, 0, 0);
+			vpn->kev_change_count++;
+			signal(SIGUSR1, SIG_IGN);
+			if (fflag) {
+				EV_SET(&vpn->kev_changes[3], STDIN_FILENO,
+				  EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
+				vpn->kev_change_count++;
+			}
+			vpn->rx_packets = vpn->tx_packets =
+				vpn->peer_init_retransmits =
+				vpn->key_init_start_retransmits =
+				vpn->key_init_ack_retransmits =
+				vpn->key_switch_start_retransmits =
+				vpn->key_switch_ack_retransmits =
+				vpn->keys_used = vpn->sess_starts =
+				vpn->sess_active_secs = vpn->inactive_secs = 0;
+
+			vpn->peer_died = false;
+			clock_gettime(CLOCK_MONOTONIC, &vpn->sess_end_ts);
+			start_protocol(vpn);
+		}
 	} else {
 		ok = false;
 		log_msg(LOG_ERR, "couldn't open config file %s: %s",
@@ -326,101 +534,712 @@ init(char *config_fname, struct vpn_fsm *fsm)
 }
 
 void
-sock_input(struct vpn_fsm *fsm)
+start_protocol(struct vpn_state *vpn)
 {
-	bool		ok;
-	unsigned char	ciphertext[crypto_box_MACBYTES + 128];
-	unsigned char	plaintext[128];
-	size_t		ciphertext_len;
-
-	ok = true;
-
-	if ((ciphertext_len = read(fsm->s, ciphertext, sizeof(ciphertext))) == -1) {
-		ok = false;
-		log_msg(LOG_ERR, "read failed: %s", strerror(errno));
-	}
-	if (ok) {
-		log_msg(LOG_NOTICE, "read: %d", ciphertext_len);
-		if (crypto_box_open_easy_afternm(plaintext, ciphertext,
-			   ciphertext_len, fsm->nonce, fsm->cur_key) != 0) {
-			ok = false;
-			log_msg(LOG_ERR, "decryption failed");
-		}
-	}
-	if (ok)
-		log_msg(LOG_NOTICE, "read %d bytes: %s", ciphertext_len, plaintext);
-
+	vpn->state = INIT;
+	vpn->role = NONE;
+	randombytes_buf(&vpn->peer_id, sizeof(vpn->peer_id));
+	randombytes_buf(vpn->nonce, sizeof(vpn->nonce));
+	bzero(vpn->remote_nonce, sizeof(vpn->remote_nonce));
+	vpn->key_sent_packet_count = 0;
+	tx_peer_id(vpn);
 }
 
 void
-expire_timer(struct vpn_fsm *fsm, struct kevent *kev)
+change_state(struct vpn_state *vpn, vpn_state new_state)
+{
+	time_t		inactive_secs;
+	char		inactive_str[32];
+
+	log_msg(LOG_INFO, "%s: %s --> %s", VPN_ROLE_STR(vpn->role),
+		VPN_STATE_STR(vpn->state), VPN_STATE_STR(new_state));
+	vpn->state = new_state;
+
+	if (vpn->state == ACTIVE) {
+		clock_gettime(CLOCK_MONOTONIC, &vpn->key_start_ts);
+		vpn->keys_used++;
+		if (vpn->peer_died || vpn->sess_starts == 0) {
+			vpn->sess_start_ts = vpn->key_start_ts;
+			inactive_secs = vpn->sess_start_ts.tv_sec -
+				vpn->sess_end_ts.tv_sec;
+			vpn->inactive_secs += inactive_secs;
+			vpn->peer_died = false;
+			vpn->sess_starts++;
+			log_msg(LOG_NOTICE, "%s: session #%" PRIu32 " started "
+				"in %s",
+				VPN_ROLE_STR(vpn->role), vpn->sess_starts,
+				time_str(inactive_secs, inactive_str, sizeof(inactive_str)));
+		}
+	}
+}
+
+void
+log_invalid_msg_for_role(struct vpn_state *vpn, message_type msg_type)
+{
+	log_msg(LOG_ERR, "%s: %s message invalid for role",
+		VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(msg_type));
+}
+
+void
+log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type)
+{
+	log_msg(LOG_ERR, "%s: %s (%d) message invalid for %s state",
+		VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(msg_type), msg_type,
+		VPN_STATE_STR(vpn->state));
+}
+
+void
+log_retransmit(struct vpn_state *vpn, message_type msg_type)
+{
+	log_msg(LOG_NOTICE, "%s: retransmitting %s",
+		VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(msg_type));
+}
+
+void
+add_timer(struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval)
+{
+	if (vpn->kev_change_count < COUNT_OF(vpn->kev_changes)) {
+		EV_SET(&vpn->kev_changes[vpn->kev_change_count], ttype,
+		       EVFILT_TIMER, EV_ADD | EV_ENABLE | EV_ONESHOT, 0,
+		       timeout_interval, 0);
+		vpn->kev_change_count++;
+
+	} else {
+		log_msg(LOG_ERR, "No space for timer event (%s)",
+			TIMER_TYPE_STR(ttype));
+	}
+}
+
+bool
+tx_encrypted(struct vpn_state *vpn, struct vpn_payload *payload, size_t data_len)
 {
 	bool		ok;
-	const unsigned char plaintext[128];
-	char		hostname  [64];
-	unsigned char	ciphertext[crypto_box_MACBYTES + 128];
-	size_t		plaintext_len, ciphertext_len;
+	unsigned char	ciphertext[crypto_box_MACBYTES + sizeof(struct vpn_payload)];
+	size_t		payload_len, ciphertext_len;
+	struct iovec	tx_iovec[2];
 
 	ok = true;
-	gethostname(hostname, sizeof(hostname));
-	snprintf((char *)plaintext, sizeof(plaintext), "from: %s", hostname);
-	plaintext_len = strlen((char *)plaintext);
-	ciphertext_len = plaintext_len + crypto_box_MACBYTES;
+	payload_len = sizeof(unsigned char) + data_len;
+	ciphertext_len = payload_len + crypto_box_MACBYTES;
 
-	if (crypto_box_easy_afternm(ciphertext, plaintext,
-			    plaintext_len, fsm->nonce, fsm->cur_key) != 0) {
+	if (crypto_box_easy_afternm(ciphertext, (unsigned char *)payload,
+		       payload_len, vpn->nonce, vpn->cur_shared_key) != 0) {
 		ok = false;
 		log_msg(LOG_ERR, "encryption failed");
 	}
 	if (ok) {
-		log_msg(LOG_NOTICE, "sending: %d (from %d)", ciphertext_len,
-			plaintext_len);
-		if (write(fsm->s, ciphertext, ciphertext_len) == -1)
+		tx_iovec[0].iov_base = vpn->nonce;
+		tx_iovec[0].iov_len = sizeof(vpn->nonce);
+		tx_iovec[1].iov_base = ciphertext;
+		tx_iovec[1].iov_len = ciphertext_len;
+
+		if (writev(vpn->ext_sock, tx_iovec, COUNT_OF(tx_iovec)) == -1) {
+			ok = false;
 			log_msg(LOG_ERR, "write failed: %s", strerror(errno));
+		} else {
+			vpn->key_sent_packet_count++;
+		}
+
+	}
+	sodium_increment(vpn->nonce, sizeof(vpn->nonce));
+
+	return ok;
+}
+
+void
+tx_peer_id(struct vpn_state *vpn)
+{
+	bool		ok;
+	struct vpn_payload payload;
+	uint32_t	peer_id;
+	timer_type	ttype;
+	intptr_t	timeout_interval;
+
+	ok = true;
+	switch (vpn->state) {
+	case INIT:
+		ttype = RETRANSMIT_PEER_INIT;
+		timeout_interval = 5000;
+		break;
+	case ACTIVE:
+		ttype = ACTIVE_HEARTBEAT;
+		timeout_interval = 10000;
+		break;
+	default:
+		ok = false;
+		log_msg(LOG_ERR, "may not transmit peer ID in %s state",
+			VPN_STATE_STR(vpn->state));
+	}
+
+	if (ok) {
+		payload.type = PEER_ID;
+		peer_id = htonl(vpn->peer_id);
+		memcpy(&payload.data, &peer_id, sizeof(peer_id));
+		if (tx_encrypted(vpn, &payload, sizeof(vpn->peer_id)))
+			add_timer(vpn, ttype, timeout_interval);
 	}
 }
 
 void
-dump_state(struct vpn_fsm *fsm)
+tx_new_public_key(struct vpn_state *vpn)
 {
+	bool		ok;
+	struct vpn_payload payload;
+	message_type	type;
+	timer_type	ttype;
+
+	ok = true;
+
+	switch (vpn->state) {
+	case KEY_NONE:
+		type = KEY_INIT_START;
+		ttype = RETRANSMIT_KEY_INIT_START;
+		break;
+	case KEY_STARTING:
+		type = KEY_INIT_ACK;
+		ttype = RETRANSMIT_KEY_INIT_ACK;
+		break;
+	case KEY_STALE:
+		type = KEY_SWITCH_START;
+		ttype = RETRANSMIT_KEY_SWITCH_START;
+		break;
+	case KEY_SWITCHING:
+		type = KEY_SWITCH_ACK;
+		ttype = RETRANSMIT_KEY_SWITCH_ACK;
+		break;
+	default:
+		ok = false;
+		log_msg(LOG_ERR, "may not transmit public key in %s state",
+			VPN_STATE_STR(vpn->state));
+	}
+
+	if (ok) {
+		payload.type = type;
+		memcpy(payload.data, vpn->new_public_key, sizeof(vpn->new_public_key));
+		if (tx_encrypted(vpn, &payload, sizeof(vpn->new_public_key)))
+			add_timer(vpn, ttype, 5000);
+	}
+}
+
+void
+tx_key_init_done(struct vpn_state *vpn)
+{
+	bool		ok;
+	struct vpn_payload payload;
+	message_type	type;
+
+	ok = true;
+	switch (vpn->state) {
+	case KEY_NONE:
+		type = KEY_INIT_DONE;
+		break;
+	case KEY_STALE:
+		type = KEY_SWITCH_DONE;
+		break;
+	default:
+		ok = false;
+		log_msg(LOG_ERR, "may not transmit key init done in %s state",
+			VPN_STATE_STR(vpn->state));
+	}
+
+	if (ok) {
+		payload.type = type;
+		if (tx_encrypted(vpn, &payload, 0))
+			add_timer(vpn, ACTIVE_HEARTBEAT, 10000);
+	}
+}
+
+void
+process_peer_id(struct vpn_state *vpn, unsigned char *data)
+{
+	uint32_t	tmp_remote_peer_id;
+
+	switch (vpn->state) {
+	case INIT:
+		memcpy(&tmp_remote_peer_id, data, sizeof(tmp_remote_peer_id));
+		vpn->remote_peer_id = ntohl(tmp_remote_peer_id);
+		if (vpn->remote_peer_id > vpn->peer_id) {
+			change_state(vpn, KEY_NONE);
+			vpn->role = INITIATOR;
+			crypto_box_keypair(vpn->new_public_key, vpn->new_secret_key);
+			tx_new_public_key(vpn);
+		} else if (vpn->remote_peer_id < vpn->peer_id) {
+			vpn->role = RESPONDER;
+		} else {
+			randombytes_buf(&vpn->peer_id, sizeof(vpn->peer_id));
+			tx_peer_id(vpn);
+		}
+
+		log_msg(LOG_INFO, "local: %" PRIu32 " peer: %" PRIu32 " role: %s",
+			vpn->peer_id, vpn->remote_peer_id,
+			VPN_ROLE_STR(vpn->role));
+
+		break;
+	case ACTIVE:
+		clock_gettime(CLOCK_MONOTONIC, &vpn->peer_last_heartbeat_ts);
+		break;
+
+	default:
+		log_invalid_msg_for_state(vpn, PEER_ID);
+	}
+}
+
+void
+process_key_init_start(struct vpn_state *vpn, unsigned char *data)
+{
+	switch (vpn->state) {
+	case INIT:
+		if (vpn->role == INITIATOR) {
+			log_invalid_msg_for_role(vpn, KEY_INIT_START);
+		} else {
+			if (vpn->role == NONE) {
+				vpn->role = RESPONDER;
+				log_msg(LOG_INFO, "Assuming %s role",
+					VPN_ROLE_STR(vpn->role));
+			}
+			crypto_box_keypair(vpn->new_public_key, vpn->new_secret_key);
+			if (crypto_box_beforenm(vpn->new_shared_key, data,
+						vpn->new_secret_key) != 0) {
+				log_msg(LOG_ERR, "couldn't create shared key");
+			} else {
+				change_state(vpn, KEY_STARTING);
+				tx_new_public_key(vpn);
+			}
+		}
+		break;
+
+	default:
+		log_invalid_msg_for_state(vpn, KEY_INIT_START);
+	}
+}
+
+void
+process_key_init_ack(struct vpn_state *vpn, unsigned char *data)
+{
+	switch (vpn->state) {
+	case KEY_NONE:
+		if (vpn->role == INITIATOR) {
+			tx_key_init_done(vpn);
+			if (crypto_box_beforenm(vpn->cur_shared_key, data,
+						vpn->new_secret_key) != 0) {
+				log_msg(LOG_ERR, "couldn't create shared key");
+			} else {
+				change_state(vpn, ACTIVE);
+				tx_peer_id(vpn);
+			}
+
+		} else {
+			log_invalid_msg_for_role(vpn, KEY_INIT_START);
+		}
+		break;
+	default:
+		log_invalid_msg_for_state(vpn, KEY_INIT_ACK);
+	}
+}
+
+void
+process_key_init_done(struct vpn_state *vpn, unsigned char *data)
+{
+	switch (vpn->state) {
+	case KEY_STARTING:
+		if (vpn->role == RESPONDER) {
+			memcpy(vpn->cur_shared_key, vpn->new_shared_key,
+			       sizeof(vpn->cur_shared_key));
+			change_state(vpn, ACTIVE);
+			tx_peer_id(vpn);
+		} else {
+			log_invalid_msg_for_role(vpn, KEY_INIT_DONE);
+		}
+		break;
+	default:
+		log_invalid_msg_for_state(vpn, KEY_INIT_DONE);
+	}
+}
+
+void
+process_key_switch_start(struct vpn_state *vpn, unsigned char *data)
+{
+	switch (vpn->state) {
+	case ACTIVE:
+		if (vpn->role == INITIATOR) {
+			log_invalid_msg_for_role(vpn, KEY_SWITCH_START);
+		} else {
+			crypto_box_keypair(vpn->new_public_key, vpn->new_secret_key);
+			if (crypto_box_beforenm(vpn->new_shared_key, data,
+						vpn->new_secret_key) != 0) {
+				log_msg(LOG_ERR, "couldn't create shared key");
+			} else {
+				change_state(vpn, KEY_SWITCHING);
+				tx_new_public_key(vpn);
+			}
+		}
+		break;
+	default:
+		log_invalid_msg_for_state(vpn, KEY_SWITCH_START);
+	}
+}
+
+void
+process_key_switch_ack(struct vpn_state *vpn, unsigned char *data)
+{
+	switch (vpn->state) {
+	case KEY_STALE:
+		if (vpn->role == INITIATOR) {
+			tx_key_init_done(vpn);
+			if (crypto_box_beforenm(vpn->cur_shared_key, data,
+						vpn->new_secret_key) != 0) {
+				log_msg(LOG_ERR, "couldn't create shared key");
+			} else {
+				clock_gettime(CLOCK_MONOTONIC, &vpn->key_start_ts);
+				vpn->key_sent_packet_count = 0;
+				change_state(vpn, ACTIVE);
+				tx_peer_id(vpn);
+			}
+		} else {
+			log_invalid_msg_for_role(vpn, KEY_SWITCH_ACK);
+		}
+		break;
+	default:
+		log_invalid_msg_for_state(vpn, KEY_SWITCH_ACK);
+	}
+}
+
+void
+process_key_switch_done(struct vpn_state *vpn, unsigned char *data)
+{
+	switch (vpn->state) {
+	case KEY_SWITCHING:
+		if (vpn->role == RESPONDER) {
+			memcpy(vpn->cur_shared_key, vpn->new_shared_key,
+			       sizeof(vpn->cur_shared_key));
+			change_state(vpn, ACTIVE);
+			tx_peer_id(vpn);
+		} else {
+			log_invalid_msg_for_role(vpn, KEY_SWITCH_DONE);
+		}
+		break;
+	default:
+		log_invalid_msg_for_state(vpn, KEY_SWITCH_DONE);
+	}
+}
+
+void
+process_rx_data(struct vpn_state *vpn, unsigned char *data, size_t data_len)
+{
+	switch (vpn->state) {
+	case ACTIVE:
+		if (write(vpn->ctrl_sock, data, data_len) < 0)
+			log_msg(LOG_ERR, "couldn't write to tunnel: %s",
+				strerror(errno));
+		else
+			vpn->rx_packets += data_len;
+		break;
+	default:
+		log_invalid_msg_for_state(vpn, KEY_SWITCH_DONE);
+	}
+}
+
+void
+ctrl_sock_input(struct vpn_state *vpn)
+{
+	struct vpn_payload payload;
+	ssize_t		payload_len;
+
+	payload.type = DATA;
+	payload_len = read(vpn->ctrl_sock, payload.data, sizeof(payload.data));
+	if (payload_len >= 0) {
+		if (tx_encrypted(vpn, &payload, payload_len))
+			vpn->tx_packets += (payload_len - sizeof(unsigned char));
+	} else {
+		log_msg(LOG_ERR, "error reading from tunnel: %s", strerror(errno));
+	}
+
+}
+
+void
+ext_sock_input(struct vpn_state *vpn)
+{
+	bool		ok;
+	unsigned char	ciphertext[crypto_box_MACBYTES + 128];
+	struct vpn_payload payload;
+	size_t		rx_len , ciphertext_len;
+	unsigned char	rx_nonce[crypto_box_NONCEBYTES];
+	char		rx_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
+	char		remote_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
+	struct iovec	rx_iovec[2];
+
+	ok = true;
+
+	rx_iovec[0].iov_base = rx_nonce;
+	rx_iovec[0].iov_len = sizeof(rx_nonce);
+	rx_iovec[1].iov_base = ciphertext;
+	rx_iovec[1].iov_len = sizeof(ciphertext);
+
+	/* TODO: don't assume data is read completely */
+	if ((rx_len = readv(vpn->ext_sock, rx_iovec, COUNT_OF(rx_iovec))) == -1) {
+		ok = false;
+		if (errno != ECONNREFUSED)
+			log_msg(LOG_ERR, "couldn't read from tunnel: %s", strerror(errno));
+	}
+	if (ok) {
+		if (sodium_compare(vpn->remote_nonce, rx_nonce, crypto_box_NONCEBYTES) > -1) {
+			ok = false;
+			log_msg(LOG_ERR, "received nonce (%s)<= previous (%s)",
+			  sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str),
+					 rx_nonce, sizeof(rx_nonce)),
+				sodium_bin2hex(remote_nonce_str, sizeof(remote_nonce_str),
+			     vpn->remote_nonce, sizeof(vpn->remote_nonce)));
+		}
+	}
+	if (ok) {
+		ciphertext_len = rx_len - sizeof(rx_nonce);
+		if (crypto_box_open_easy_afternm((unsigned char *)&payload, ciphertext,
+		      ciphertext_len, rx_nonce, vpn->cur_shared_key) != 0) {
+			ok = false;
+			log_msg(LOG_ERR, "decryption failed of %zu bytes", ciphertext_len);
+		} else {
+			memcpy(vpn->remote_nonce, rx_nonce, sizeof(vpn->remote_nonce));
+		}
+	}
+	if (ok) {
+		log_msg(LOG_INFO, "%s: received %s in %s state",
+			VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(payload.type),
+			VPN_STATE_STR(vpn->state));
+
+		switch (payload.type) {
+		case PEER_ID:
+			process_peer_id(vpn, payload.data);
+			break;
+		case KEY_INIT_START:
+			process_key_init_start(vpn, payload.data);
+			break;
+		case KEY_INIT_ACK:
+			process_key_init_ack(vpn, payload.data);
+			break;
+		case KEY_INIT_DONE:
+			process_key_init_done(vpn, payload.data);
+			break;
+		case KEY_SWITCH_START:
+			process_key_switch_start(vpn, payload.data);
+			break;
+		case KEY_SWITCH_ACK:
+			process_key_switch_ack(vpn, payload.data);
+			break;
+		case KEY_SWITCH_DONE:
+			process_key_switch_done(vpn, payload.data);
+			break;
+		case DEBUG_STRING:
+			log_msg(LOG_NOTICE, "%3zu bytes: (%s) \"%s\"", ciphertext_len,
+				MSG_TYPE_STR(payload.type), payload.data);
+			break;
+		case DATA:
+			process_rx_data(vpn, payload.data,
+				      ciphertext_len - crypto_box_MACBYTES);
+			break;
+		default:
+			log_msg(LOG_ERR, "unknown message type %d", payload.type);
+		}
+	}
+}
+
+void
+stdin_input(struct vpn_state *vpn)
+{
+	struct vpn_payload payload;
+	char           *tx_data;
+	size_t		data_len;
+	char           *last_char;
+
+	payload.type = DEBUG_STRING;
+	tx_data = (char *)payload.data;
+	fgets(tx_data, sizeof(payload.data) - 1, stdin);
+
+	if (strcmp(tx_data, "\n") == 0) {
+		//Do nothing.No sense in sending a blank line.
+	} else if (strcmp(tx_data, "stats\n") == 0) {
+		log_state(vpn);
+	} else {
+		last_char = &tx_data[strlen(tx_data) - 1];
+		if (*last_char == '\n')
+			*last_char = '\0';
+		data_len = strlen(tx_data) + sizeof('\0');
+		if (tx_encrypted(vpn, &payload, data_len))
+			vpn->tx_packets += data_len;
+	}
 
 }
 
 bool
-run(struct vpn_fsm *fsm)
+dead_peer_restart(struct vpn_state *vpn, struct timespec now)
+{
+	time_t		cur_sess_active_secs;
+	char		cur_sess_active_str[32];
+
+	if ((now.tv_sec - vpn->peer_last_heartbeat_ts.tv_sec)
+	    <= PEER_MAX_HEARTBEAT_INTERVAL_SECS) {
+		vpn->peer_died = false;
+	} else {
+		if (vpn->peer_died == false) {
+			vpn->peer_died = true;
+			clock_gettime(CLOCK_MONOTONIC, &vpn->sess_end_ts);
+			cur_sess_active_secs = vpn->sess_end_ts.tv_sec -
+				vpn->sess_start_ts.tv_sec;
+			vpn->sess_active_secs += cur_sess_active_secs;
+			log_msg(LOG_ERR, "%s state: peer died after %s.",
+				VPN_STATE_STR(vpn->state),
+			 time_str(cur_sess_active_secs, cur_sess_active_str,
+				  sizeof(cur_sess_active_str)));
+		}
+		memcpy(vpn->cur_shared_key, vpn->orig_shared_key,
+		       sizeof(vpn->cur_shared_key));
+		start_protocol(vpn);
+	}
+
+	return vpn->peer_died;
+}
+
+void
+process_timeout(struct vpn_state *vpn, struct kevent *kev)
+{
+	struct timespec	now;
+	time_t		age;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	switch (kev->ident) {
+	case RETRANSMIT_PEER_INIT:
+		if (vpn->state == INIT) {
+			vpn->peer_init_retransmits++;
+			log_retransmit(vpn, PEER_ID);
+			tx_peer_id(vpn);
+		}
+		break;
+	case RETRANSMIT_KEY_INIT_START:
+		if ((!dead_peer_restart(vpn, now)) && vpn->state == KEY_NONE) {
+			vpn->key_init_start_retransmits++;
+			log_retransmit(vpn, KEY_INIT_START);
+			tx_new_public_key(vpn);
+		}
+		break;
+	case RETRANSMIT_KEY_INIT_ACK:
+		if ((!dead_peer_restart(vpn, now)) && vpn->state == KEY_STARTING) {
+			vpn->key_init_ack_retransmits++;
+			log_retransmit(vpn, KEY_INIT_ACK);
+			tx_new_public_key(vpn);
+		}
+		break;
+	case ACTIVE_HEARTBEAT:
+		if ((!dead_peer_restart(vpn, now)) && vpn->state == ACTIVE) {
+			tx_peer_id(vpn);
+			if (vpn->role == INITIATOR) {
+				age = now.tv_sec - vpn->key_start_ts.tv_sec;
+				if ((age >= KEY_MAX_AGE_SECS) ||
+				    (vpn->key_sent_packet_count
+				     >= KEY_MAX_PACKET_COUNT)) {
+					change_state(vpn, KEY_STALE);
+					crypto_box_keypair(vpn->new_public_key,
+						       vpn->new_secret_key);
+					tx_new_public_key(vpn);
+				}
+			}
+		}
+		break;
+	case RETRANSMIT_KEY_SWITCH_START:
+		if ((!dead_peer_restart(vpn, now)) && vpn->state == KEY_STALE) {
+			vpn->key_switch_start_retransmits++;
+			log_retransmit(vpn, KEY_SWITCH_START);
+			tx_new_public_key(vpn);
+		}
+		break;
+	case RETRANSMIT_KEY_SWITCH_ACK:
+		if ((!dead_peer_restart(vpn, now)) && vpn->state == KEY_SWITCHING) {
+			vpn->key_switch_ack_retransmits++;
+			log_retransmit(vpn, KEY_SWITCH_ACK);
+			tx_new_public_key(vpn);
+		}
+		break;
+	default:
+		log_msg(LOG_ERR, "unknown timer id: %u", kev->ident);
+	}
+
+}
+
+void
+log_state(struct vpn_state *vpn)
+{
+	struct timespec	now;
+	time_t		cur_inactive_secs, cur_sess_active_secs;
+	char		cur_inactive_str[32], cur_sess_active_str[32];
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	cur_inactive_secs = vpn->inactive_secs;
+	cur_sess_active_secs = vpn->sess_active_secs;
+
+	if (vpn->state == ACTIVE) {
+		cur_sess_active_secs += (now.tv_sec - vpn->sess_start_ts.tv_sec);
+	} else {
+		cur_inactive_secs += (now.tv_sec - vpn->sess_end_ts.tv_sec);
+	}
+
+	log_msg(LOG_NOTICE, "%s (%s):\n"
+		"keys used: %" PRIu32 " session starts: %" PRIu32 "\n"
+		"time inactive/active: %s/%s\n"
+		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
+	"retransmits (pi/kis/kia/kss/ksa): %" PRIu32 "/%" PRIu32 "/%" PRIu32
+		"/%" PRIu32 "/%" PRIu32 "\n"
+		"last peer message: %" PRIu32 " sec. ago",
+		VPN_ROLE_STR(vpn->role), VPN_STATE_STR(vpn->state),
+		vpn->keys_used, vpn->sess_starts,
+		time_str(cur_inactive_secs, cur_inactive_str,
+			 sizeof(cur_inactive_str)),
+		time_str(cur_sess_active_secs, cur_sess_active_str,
+			 sizeof(cur_sess_active_str)),
+		vpn->rx_packets, vpn->tx_packets,
+		vpn->peer_init_retransmits,
+	     vpn->key_init_start_retransmits, vpn->key_init_ack_retransmits,
+	 vpn->key_switch_start_retransmits, vpn->key_switch_ack_retransmits,
+		(now.tv_sec - vpn->peer_last_heartbeat_ts.tv_sec));
+}
+
+bool
+run(struct vpn_state *vpn)
 {
 	bool		ok;
-	struct kevent	changes[2], event;
+	struct kevent	event;
 	int		kq        , nev;
 	ok = true;
-
-	EV_SET(&changes[0], 1, EVFILT_TIMER, EV_ADD | EV_ENABLE, 0, 2000, 0);
-	EV_SET(&changes[1], fsm->s, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
 
 	if ((kq = kqueue()) == -1) {
 		ok = false;
 		log_msg(LOG_ERR, "kqueue(): %s", strerror(errno));
 	}
 	while (ok) {
-		nev = kevent(kq, changes, 2, &event, 1, NULL);
+		nev = kevent(kq, vpn->kev_changes, vpn->kev_change_count,
+			     &event, 1, NULL);
+		vpn->kev_change_count = 0;
 		if (nev < 0) {
 			ok = false;
 			log_msg(LOG_ERR, "kevent: %s", strerror(errno));
 		} else {
 			if (event.flags & EV_ERROR) {
 				ok = false;
-				log_msg(LOG_ERR, "EV_ERROR: %s for %lu",
+				log_msg(LOG_ERR, "EV_ERROR: %s for %" PRIuPTR,
 					strerror(event.data), event.ident);
 			} else {
 				switch (event.filter) {
 				case EVFILT_READ:
-					sock_input(fsm);
+					if (event.ident == vpn->ext_sock)
+						ext_sock_input(vpn);
+					else if (event.ident == vpn->ctrl_sock)
+						ctrl_sock_input(vpn);
+					else if (event.ident == STDIN_FILENO)
+						stdin_input(vpn);
 					break;
 				case EVFILT_TIMER:
-					expire_timer(fsm, &event);
+					process_timeout(vpn, &event);
 					break;
 				case EVFILT_SIGNAL:
-					dump_state(fsm);
+					log_state(vpn);
 					break;
 				default:
 					log_msg(LOG_WARNING, "unhandled event type: %d",
@@ -439,7 +1258,7 @@ main(int argc, char *argv[])
 
 	const char     *opts;
 	int		ch;
-	struct vpn_fsm	fsm;
+	struct vpn_state vpn;
 	char           *config_fname;
 
 	opts = "dfc:";
@@ -484,11 +1303,11 @@ main(int argc, char *argv[])
 		if (log_upto >= 0)
 			setlogmask(LOG_UPTO(log_upto));
 	}
-	if (init(config_fname, &fsm)) {
+	if (init(fflag, config_fname, &vpn)) {
 		if (!fflag)
 			daemon(0, 0);
 
-		return run(&fsm) ? EXIT_SUCCESS : EXIT_FAILURE;
+		return run(&vpn) ? EXIT_SUCCESS : EXIT_FAILURE;
 	} else {
 		return EXIT_FAILURE;
 	}
