@@ -128,11 +128,11 @@ struct config_param {
 	char           *default_value;
 };
 
-#define PAYLOAD_SZ 1400
+#define DATA_SZ 1400
 /* Message data structure definitions */
-struct vpn_payload {
+struct vpn_msg {
 	unsigned char	type;
-	unsigned char	data[PAYLOAD_SZ];
+	unsigned char	data[DATA_SZ];
 };
 
 /* Finite state machine state data. */
@@ -186,18 +186,20 @@ void		log_invalid_msg_for_role(struct vpn_state *vpn, message_type msg_type);
 void		log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type);
 void		log_retransmit(struct vpn_state *vpn, message_type msg_type);
 void		add_timer (struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval);
-bool		tx_encrypted(struct vpn_state *vpn, struct vpn_payload *payload, size_t data_len);
+bool		tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len);
 void		tx_peer_id(struct vpn_state *vpn);
 void		tx_new_public_key(struct vpn_state *vpn);
 void		tx_key_init_done(struct vpn_state *vpn);
-void		process_peer_id(struct vpn_state *vpn, struct vpn_payload *payload);
-void		process_key_init_start(struct vpn_state *vpn, struct vpn_payload *payload);
-void		process_key_init_ack(struct vpn_state *vpn, struct vpn_payload *payload);
-void		process_key_init_done(struct vpn_state *vpn, struct vpn_payload *payload);
-void		process_key_switch_start(struct vpn_state *vpn, struct vpn_payload *payload);
-void		process_key_switch_ack(struct vpn_state *vpn, struct vpn_payload *payload);
-void		process_key_switch_done(struct vpn_state *vpn, struct vpn_payload *payload);
-void		process_rx_data(struct vpn_state *vpn, struct vpn_payload *payload, size_t data_len);
+void		process_peer_id(struct vpn_state *vpn, struct vpn_msg *msg);
+void		process_key_init_start(struct vpn_state *vpn, struct vpn_msg *msg);
+void		process_key_init_ack(struct vpn_state *vpn, struct vpn_msg *msg);
+void		process_key_init_done(struct vpn_state *vpn, struct vpn_msg *msg);
+void		process_key_switch_start(struct vpn_state *vpn, struct vpn_msg *msg);
+void		process_key_switch_ack(struct vpn_state *vpn, struct vpn_msg *msg);
+void		process_key_switch_done(struct vpn_state *vpn, struct vpn_msg *msg);
+void		process_debug_string(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len);
+
+void		process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len);
 void		ext_sock_input(struct vpn_state *vpn);
 void		ctrl_sock_input(struct vpn_state *vpn);
 void		stdin_input(struct vpn_state *vpn);
@@ -621,10 +623,10 @@ add_timer(struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval)
 }
 
 bool
-tx_encrypted(struct vpn_state *vpn, struct vpn_payload *payload, size_t data_len)
+tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 {
 	bool		ok;
-	unsigned char	ciphertext[crypto_box_MACBYTES + sizeof(struct vpn_payload)];
+	unsigned char	ciphertext[crypto_box_MACBYTES + sizeof(struct vpn_msg)];
 	size_t		payload_len, ciphertext_len;
 	struct iovec	tx_iovec[2];
 
@@ -632,7 +634,7 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_payload *payload, size_t data_len
 	payload_len = sizeof(unsigned char) + data_len;
 	ciphertext_len = payload_len + crypto_box_MACBYTES;
 
-	if (crypto_box_easy_afternm(ciphertext, (unsigned char *)payload,
+	if (crypto_box_easy_afternm(ciphertext, (unsigned char *)msg,
 		       payload_len, vpn->nonce, vpn->cur_shared_key) != 0) {
 		ok = false;
 		log_msg(LOG_ERR, "encryption failed");
@@ -660,7 +662,7 @@ void
 tx_peer_id(struct vpn_state *vpn)
 {
 	bool		ok;
-	struct vpn_payload payload;
+	struct vpn_msg	msg;
 	uint32_t	peer_id;
 	timer_type	ttype;
 	intptr_t	timeout_interval;
@@ -682,10 +684,10 @@ tx_peer_id(struct vpn_state *vpn)
 	}
 
 	if (ok) {
-		payload.type = PEER_ID;
+		msg.type = PEER_ID;
 		peer_id = htonl(vpn->peer_id);
-		memcpy(&payload.data, &peer_id, sizeof(peer_id));
-		if (tx_encrypted(vpn, &payload, sizeof(vpn->peer_id)))
+		memcpy(&msg.data, &peer_id, sizeof(peer_id));
+		if (tx_encrypted(vpn, &msg, sizeof(vpn->peer_id)))
 			add_timer(vpn, ttype, timeout_interval);
 	}
 }
@@ -694,7 +696,7 @@ void
 tx_new_public_key(struct vpn_state *vpn)
 {
 	bool		ok;
-	struct vpn_payload payload;
+	struct vpn_msg	msg;
 	message_type	type;
 	timer_type	ttype;
 
@@ -716,9 +718,9 @@ tx_new_public_key(struct vpn_state *vpn)
 	}
 
 	if (ok) {
-		payload.type = type;
-		memcpy(payload.data, vpn->new_public_key, sizeof(vpn->new_public_key));
-		if (tx_encrypted(vpn, &payload, sizeof(vpn->new_public_key)))
+		msg.type = type;
+		memcpy(msg.data, vpn->new_public_key, sizeof(vpn->new_public_key));
+		if (tx_encrypted(vpn, &msg, sizeof(vpn->new_public_key)))
 			add_timer(vpn, ttype, 5000);
 	}
 }
@@ -727,7 +729,7 @@ void
 tx_key_init_done(struct vpn_state *vpn)
 {
 	bool		ok;
-	struct vpn_payload payload;
+	struct vpn_msg	msg;
 	message_type	type;
 
 	ok = true;
@@ -742,20 +744,20 @@ tx_key_init_done(struct vpn_state *vpn)
 	}
 
 	if (ok) {
-		payload.type = type;
-		if (tx_encrypted(vpn, &payload, 0))
+		msg.type = type;
+		if (tx_encrypted(vpn, &msg, 0))
 			add_timer(vpn, ACTIVE_HEARTBEAT, 10000);
 	}
 }
 
 void
-process_peer_id(struct vpn_state *vpn, struct vpn_payload *payload)
+process_peer_id(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	uint32_t	tmp_remote_peer_id;
 
 	switch (vpn->state) {
 	case INIT:
-		memcpy(&tmp_remote_peer_id, payload->data, sizeof(tmp_remote_peer_id));
+		memcpy(&tmp_remote_peer_id, msg->data, sizeof(tmp_remote_peer_id));
 		vpn->remote_peer_id = ntohl(tmp_remote_peer_id);
 		if (vpn->remote_peer_id > vpn->peer_id) {
 			change_state(vpn, KEY_STALE);
@@ -779,18 +781,18 @@ process_peer_id(struct vpn_state *vpn, struct vpn_payload *payload)
 		break;
 
 	default:
-		log_invalid_msg_for_state(vpn, payload->type);
+		log_invalid_msg_for_state(vpn, msg->type);
 	}
 }
 
 void
-process_key_switch_start(struct vpn_state *vpn, struct vpn_payload *payload)
+process_key_switch_start(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	switch (vpn->state) {
 	case INIT:
 	case ACTIVE:
 		if (vpn->role == INITIATOR) {
-			log_invalid_msg_for_role(vpn, payload->type);
+			log_invalid_msg_for_role(vpn, msg->type);
 		} else {
 			if (vpn->role == NONE) {
 				vpn->role = RESPONDER;
@@ -798,7 +800,7 @@ process_key_switch_start(struct vpn_state *vpn, struct vpn_payload *payload)
 					VPN_ROLE_STR(vpn->role));
 			}
 			crypto_box_keypair(vpn->new_public_key, vpn->new_secret_key);
-			if (crypto_box_beforenm(vpn->new_shared_key, payload->data,
+			if (crypto_box_beforenm(vpn->new_shared_key, msg->data,
 						vpn->new_secret_key) != 0) {
 				log_msg(LOG_ERR, "couldn't create shared key");
 			} else {
@@ -808,18 +810,18 @@ process_key_switch_start(struct vpn_state *vpn, struct vpn_payload *payload)
 		}
 		break;
 	default:
-		log_invalid_msg_for_state(vpn, payload->type);
+		log_invalid_msg_for_state(vpn, msg->type);
 	}
 }
 
 void
-process_key_switch_ack(struct vpn_state *vpn, struct vpn_payload *payload)
+process_key_switch_ack(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	switch (vpn->state) {
 	case KEY_STALE:
 		if (vpn->role == INITIATOR) {
 			tx_key_init_done(vpn);
-			if (crypto_box_beforenm(vpn->cur_shared_key, payload->data,
+			if (crypto_box_beforenm(vpn->cur_shared_key, msg->data,
 						vpn->new_secret_key) != 0) {
 				log_msg(LOG_ERR, "couldn't create shared key");
 			} else {
@@ -827,16 +829,16 @@ process_key_switch_ack(struct vpn_state *vpn, struct vpn_payload *payload)
 				tx_peer_id(vpn);
 			}
 		} else {
-			log_invalid_msg_for_role(vpn, payload->type);
+			log_invalid_msg_for_role(vpn, msg->type);
 		}
 		break;
 	default:
-		log_invalid_msg_for_state(vpn, payload->type);
+		log_invalid_msg_for_state(vpn, msg->type);
 	}
 }
 
 void
-process_key_switch_done(struct vpn_state *vpn, struct vpn_payload *payload)
+process_key_switch_done(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	switch (vpn->state) {
 	case KEY_SWITCHING:
@@ -846,41 +848,51 @@ process_key_switch_done(struct vpn_state *vpn, struct vpn_payload *payload)
 			change_state(vpn, ACTIVE);
 			tx_peer_id(vpn);
 		} else {
-			log_invalid_msg_for_role(vpn, payload->type);
+			log_invalid_msg_for_role(vpn, msg->type);
 		}
 		break;
 	default:
-		log_invalid_msg_for_state(vpn, payload->type);
+		log_invalid_msg_for_state(vpn, msg->type);
 	}
 }
 
 void
-process_rx_data(struct vpn_state *vpn, struct vpn_payload *payload, size_t data_len)
+process_debug_string(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
+{
+	vpn->rx_bytes += data_len;
+
+	log_msg(LOG_NOTICE, "%3zu bytes: (%s) \"%s\"", data_len,
+		MSG_TYPE_STR(msg->type), msg->data);
+
+}
+
+void
+process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 {
 	switch (vpn->state) {
 	case ACTIVE:
-		if (write(vpn->ctrl_sock, payload->data, data_len) < 0)
+		if (write(vpn->ctrl_sock, msg->data, data_len) < 0)
 			log_msg(LOG_ERR, "couldn't write to tunnel: %s",
 				strerror(errno));
 		else
 			vpn->rx_bytes += data_len;
 		break;
 	default:
-		log_invalid_msg_for_state(vpn, payload->type);
+		log_invalid_msg_for_state(vpn, msg->type);
 	}
 }
 
 void
 ctrl_sock_input(struct vpn_state *vpn)
 {
-	struct vpn_payload payload;
-	ssize_t		payload_len;
+	struct vpn_msg	msg;
+	ssize_t		data_len;
 
-	payload.type = DATA;
-	payload_len = read(vpn->ctrl_sock, payload.data, sizeof(payload.data));
-	if (payload_len >= 0) {
-		if (tx_encrypted(vpn, &payload, payload_len))
-			vpn->tx_bytes += (payload_len - sizeof(unsigned char));
+	msg.type = DATA;
+	data_len = read(vpn->ctrl_sock, msg.data, sizeof(msg.data));
+	if (data_len >= 0) {
+		if (tx_encrypted(vpn, &msg, data_len))
+			vpn->tx_bytes += data_len;
 	} else {
 		log_msg(LOG_ERR, "error reading from tunnel: %s", strerror(errno));
 	}
@@ -892,12 +904,13 @@ ext_sock_input(struct vpn_state *vpn)
 {
 	bool		ok;
 	unsigned char	ciphertext[crypto_box_MACBYTES + 128];
-	struct vpn_payload payload;
+	struct vpn_msg	msg;
 	size_t		rx_len , ciphertext_len;
 	unsigned char	rx_nonce[crypto_box_NONCEBYTES];
 	char		rx_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
 	char		remote_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
 	struct iovec	rx_iovec[2];
+	size_t		data_len;
 
 	ok = true;
 
@@ -924,7 +937,7 @@ ext_sock_input(struct vpn_state *vpn)
 	}
 	if (ok) {
 		ciphertext_len = rx_len - sizeof(rx_nonce);
-		if (crypto_box_open_easy_afternm((unsigned char *)&payload, ciphertext,
+		if (crypto_box_open_easy_afternm((unsigned char *)&msg, ciphertext,
 		      ciphertext_len, rx_nonce, vpn->cur_shared_key) != 0) {
 			ok = false;
 			log_msg(LOG_ERR, "decryption failed of %zu bytes", ciphertext_len);
@@ -933,33 +946,33 @@ ext_sock_input(struct vpn_state *vpn)
 		}
 	}
 	if (ok) {
+		data_len = ciphertext_len - crypto_box_MACBYTES - sizeof(msg.type);
+
 		log_msg(LOG_INFO, "%s: received %s in %s state",
-			VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(payload.type),
+			VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(msg.type),
 			VPN_STATE_STR(vpn->state));
 
-		switch (payload.type) {
+		switch (msg.type) {
 		case PEER_ID:
-			process_peer_id(vpn, &payload);
+			process_peer_id(vpn, &msg);
 			break;
 		case KEY_SWITCH_START:
-			process_key_switch_start(vpn, &payload);
+			process_key_switch_start(vpn, &msg);
 			break;
 		case KEY_SWITCH_ACK:
-			process_key_switch_ack(vpn, &payload);
+			process_key_switch_ack(vpn, &msg);
 			break;
 		case KEY_SWITCH_DONE:
-			process_key_switch_done(vpn, &payload);
+			process_key_switch_done(vpn, &msg);
 			break;
 		case DEBUG_STRING:
-			log_msg(LOG_NOTICE, "%3zu bytes: (%s) \"%s\"", ciphertext_len,
-				MSG_TYPE_STR(payload.type), payload.data);
+			process_debug_string(vpn, &msg, data_len);
 			break;
 		case DATA:
-			process_rx_data(vpn, &payload,
-				      ciphertext_len - crypto_box_MACBYTES);
+			process_rx_data(vpn, &msg, data_len);
 			break;
 		default:
-			log_msg(LOG_ERR, "unknown message type %d", payload.type);
+			log_msg(LOG_ERR, "unknown message type %d", msg.type);
 		}
 	}
 }
@@ -967,14 +980,14 @@ ext_sock_input(struct vpn_state *vpn)
 void
 stdin_input(struct vpn_state *vpn)
 {
-	struct vpn_payload payload;
+	struct vpn_msg	msg;
 	char           *tx_data;
 	size_t		data_len;
 	char           *last_char;
 
-	payload.type = DEBUG_STRING;
-	tx_data = (char *)payload.data;
-	fgets(tx_data, sizeof(payload.data) - 1, stdin);
+	msg.type = DEBUG_STRING;
+	tx_data = (char *)msg.data;
+	fgets(tx_data, sizeof(msg.data) - 1, stdin);
 
 	if (strcmp(tx_data, "\n") == 0) {
 		//Do nothing.No sense in sending a blank line.
@@ -984,8 +997,8 @@ stdin_input(struct vpn_state *vpn)
 		last_char = &tx_data[strlen(tx_data) - 1];
 		if (*last_char == '\n')
 			*last_char = '\0';
-		data_len = strlen(tx_data) + sizeof('\0');
-		if (tx_encrypted(vpn, &payload, data_len))
+		data_len = strlen(tx_data) + sizeof(char);
+		if (tx_encrypted(vpn, &msg, data_len))
 			vpn->tx_bytes += data_len;
 	}
 
