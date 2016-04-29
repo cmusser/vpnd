@@ -36,8 +36,8 @@
 /* VPN states */
 typedef enum {
 	INIT,
-	KEY_STALE,
-	KEY_SWITCHING,
+	MASTER_KEY_STALE,
+	SLAVE_KEY_SWITCHING,
 	ACTIVE_MASTER,
 	ACTIVE_SLAVE,
 	VPN_STATE_LAST_PLUS_ONE,
@@ -46,10 +46,10 @@ typedef enum {
 const char     *vpn_state_string_array[VPN_STATE_LAST_PLUS_ONE] =
 {
 	"INIT",
-	"KEY_STALE",
-	"KEY_SWITCHING",
-	"ACTIVE MASTER",
-	"ACTIVE SLAVE",
+	"MASTER KEY STALE",
+	"SLAVE KEY SWITCHING",
+	"ACTIVE (MASTER)",
+	"ACTIVE (SLAVE)",
 };
 
 #define VPN_STATE_STR(state) \
@@ -557,8 +557,9 @@ change_state(struct vpn_state *vpn, vpn_state new_state)
 			vpn->inactive_secs += inactive_secs;
 			vpn->peer_died = false;
 			vpn->sess_starts++;
-			log_msg(LOG_NOTICE, "session #%" PRIu32 " started "
+			log_msg(LOG_NOTICE, "%s: session #%" PRIu32 " started "
 				"in %s",
+				VPN_STATE_STR(vpn->state),
 				vpn->sess_starts,
 				time_str(inactive_secs, inactive_str, sizeof(inactive_str)));
 		}
@@ -568,14 +569,15 @@ change_state(struct vpn_state *vpn, vpn_state new_state)
 void
 log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type)
 {
-	log_msg(LOG_ERR, "%s (%d) message invalid for %s state",
-		MSG_TYPE_STR(msg_type), msg_type, VPN_STATE_STR(vpn->state));
+	log_msg(LOG_ERR, "%s: %s (%d) message invalid for state",
+		VPN_STATE_STR(vpn->state), MSG_TYPE_STR(msg_type), msg_type);
 }
 
 void
 log_retransmit(struct vpn_state *vpn, message_type msg_type)
 {
-	log_msg(LOG_NOTICE, "retransmitting %s", MSG_TYPE_STR(msg_type));
+	log_msg(LOG_NOTICE, "%s: retransmitting %s", VPN_STATE_STR(vpn->state),
+		MSG_TYPE_STR(msg_type));
 }
 
 void
@@ -588,8 +590,8 @@ add_timer(struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval)
 		vpn->kev_change_count++;
 
 	} else {
-		log_msg(LOG_ERR, "No space for timer event (%s)",
-			TIMER_TYPE_STR(ttype));
+		log_msg(LOG_ERR, "%s: No space for timer event (%s)",
+			VPN_STATE_STR(vpn->state), TIMER_TYPE_STR(ttype));
 	}
 }
 
@@ -608,7 +610,7 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 	if (crypto_box_easy_afternm(ciphertext, (unsigned char *)msg,
 		       payload_len, vpn->nonce, vpn->cur_shared_key) != 0) {
 		ok = false;
-		log_msg(LOG_ERR, "encryption failed");
+		log_msg(LOG_ERR, "%s: encryption failed", VPN_STATE_STR(vpn->state));
 	}
 	if (ok) {
 		tx_iovec[0].iov_base = vpn->nonce;
@@ -618,7 +620,8 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 
 		if (writev(vpn->ext_sock, tx_iovec, COUNT_OF(tx_iovec)) == -1) {
 			ok = false;
-			log_msg(LOG_ERR, "write failed: %s", strerror(errno));
+			log_msg(LOG_ERR, "%sL write failed -- %s",
+				VPN_STATE_STR(vpn->state), strerror(errno));
 		} else {
 			vpn->key_sent_packet_count++;
 		}
@@ -651,7 +654,7 @@ tx_peer_id(struct vpn_state *vpn)
 		break;
 	default:
 		ok = false;
-		log_msg(LOG_ERR, "may not transmit peer ID in %s state",
+		log_msg(LOG_ERR, "%s: may not transmit peer ID in state",
 			VPN_STATE_STR(vpn->state));
 	}
 
@@ -675,17 +678,17 @@ tx_new_public_key(struct vpn_state *vpn)
 	ok = true;
 
 	switch (vpn->state) {
-	case KEY_STALE:
+	case MASTER_KEY_STALE:
 		type = KEY_SWITCH_START;
 		ttype = RETRANSMIT_KEY_SWITCH_START;
 		break;
-	case KEY_SWITCHING:
+	case SLAVE_KEY_SWITCHING:
 		type = KEY_SWITCH_ACK;
 		ttype = RETRANSMIT_KEY_SWITCH_ACK;
 		break;
 	default:
 		ok = false;
-		log_msg(LOG_ERR, "may not transmit public key in %s state",
+		log_msg(LOG_ERR, "%s: may not transmit public key in state",
 			VPN_STATE_STR(vpn->state));
 	}
 
@@ -706,12 +709,12 @@ tx_key_init_done(struct vpn_state *vpn)
 
 	ok = true;
 	switch (vpn->state) {
-	case KEY_STALE:
+	case MASTER_KEY_STALE:
 		type = KEY_SWITCH_DONE;
 		break;
 	default:
 		ok = false;
-		log_msg(LOG_ERR, "may not transmit key init done in %s state",
+		log_msg(LOG_ERR, "%s: may not transmit key init done in state",
 			VPN_STATE_STR(vpn->state));
 	}
 
@@ -733,7 +736,7 @@ process_peer_id(struct vpn_state *vpn, struct vpn_msg *msg)
 		vpn->remote_peer_id = ntohl(tmp_remote_peer_id);
 		if (vpn->remote_peer_id > vpn->peer_id) {
 			log_msg(LOG_INFO, "will be key master");
-			change_state(vpn, KEY_STALE);
+			change_state(vpn, MASTER_KEY_STALE);
 			crypto_box_keypair(vpn->new_public_key, vpn->new_secret_key);
 			tx_new_public_key(vpn);
 		} else if (vpn->remote_peer_id < vpn->peer_id) {
@@ -764,9 +767,10 @@ process_key_switch_start(struct vpn_state *vpn, struct vpn_msg *msg)
 		crypto_box_keypair(vpn->new_public_key, vpn->new_secret_key);
 		if (crypto_box_beforenm(vpn->new_shared_key, msg->data,
 					vpn->new_secret_key) != 0) {
-			log_msg(LOG_ERR, "couldn't create shared key");
+			log_msg(LOG_ERR, "%s: couldn't create shared key",
+				VPN_STATE_STR(vpn->state));
 		} else {
-			change_state(vpn, KEY_SWITCHING);
+			change_state(vpn, SLAVE_KEY_SWITCHING);
 			tx_new_public_key(vpn);
 		}
 		break;
@@ -779,11 +783,12 @@ void
 process_key_switch_ack(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	switch (vpn->state) {
-	case KEY_STALE:
+	case MASTER_KEY_STALE:
 		tx_key_init_done(vpn);
 		if (crypto_box_beforenm(vpn->cur_shared_key, msg->data,
 					vpn->new_secret_key) != 0) {
-			log_msg(LOG_ERR, "couldn't create shared key");
+			log_msg(LOG_ERR, "%s couldn't create shared key",
+				VPN_STATE_STR(vpn->state));
 		} else {
 			change_state(vpn, ACTIVE_MASTER);
 			tx_peer_id(vpn);
@@ -798,7 +803,7 @@ void
 process_key_switch_done(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	switch (vpn->state) {
-	case KEY_SWITCHING:
+	case SLAVE_KEY_SWITCHING:
 		memcpy(vpn->cur_shared_key, vpn->new_shared_key,
 		       sizeof(vpn->cur_shared_key));
 		change_state(vpn, ACTIVE_SLAVE);
@@ -826,8 +831,8 @@ process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
 		if (write(vpn->ctrl_sock, msg->data, data_len) < 0)
-			log_msg(LOG_ERR, "couldn't write to tunnel: %s",
-				strerror(errno));
+			log_msg(LOG_ERR, "%s: couldn't write to tunnel -- %s",
+				VPN_STATE_STR(vpn->state), strerror(errno));
 		else
 			vpn->rx_bytes += data_len;
 		break;
@@ -848,7 +853,8 @@ ctrl_sock_input(struct vpn_state *vpn)
 		if (tx_encrypted(vpn, &msg, data_len))
 			vpn->tx_bytes += data_len;
 	} else {
-		log_msg(LOG_ERR, "error reading from tunnel: %s", strerror(errno));
+		log_msg(LOG_ERR, "%s: error reading from tunnel interface -- %s",
+			VPN_STATE_STR(vpn->state), strerror(errno));
 	}
 
 }
@@ -877,12 +883,14 @@ ext_sock_input(struct vpn_state *vpn)
 	if ((rx_len = readv(vpn->ext_sock, rx_iovec, COUNT_OF(rx_iovec))) == -1) {
 		ok = false;
 		if (errno != ECONNREFUSED)
-			log_msg(LOG_ERR, "couldn't read from tunnel: %s", strerror(errno));
+			log_msg(LOG_ERR, "%s: error reading from tunnel socket: %s",
+				VPN_STATE_STR(vpn->state), strerror(errno));
 	}
 	if (ok) {
 		if (sodium_compare(vpn->remote_nonce, rx_nonce, crypto_box_NONCEBYTES) > -1) {
 			ok = false;
-			log_msg(LOG_ERR, "received nonce (%s)<= previous (%s)",
+			log_msg(LOG_ERR, "%s: received nonce (%s)<= previous (%s)",
+				VPN_STATE_STR(vpn->state),
 			  sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str),
 					 rx_nonce, sizeof(rx_nonce)),
 				sodium_bin2hex(remote_nonce_str, sizeof(remote_nonce_str),
@@ -894,7 +902,8 @@ ext_sock_input(struct vpn_state *vpn)
 		if (crypto_box_open_easy_afternm((unsigned char *)&msg, ciphertext,
 		      ciphertext_len, rx_nonce, vpn->cur_shared_key) != 0) {
 			ok = false;
-			log_msg(LOG_ERR, "decryption failed of %zu bytes", ciphertext_len);
+			log_msg(LOG_ERR, "%s: decryption failed of %zu bytes",
+				VPN_STATE_STR(vpn->state), ciphertext_len);
 		} else {
 			memcpy(vpn->remote_nonce, rx_nonce, sizeof(vpn->remote_nonce));
 		}
@@ -902,8 +911,8 @@ ext_sock_input(struct vpn_state *vpn)
 	if (ok) {
 		data_len = ciphertext_len - crypto_box_MACBYTES - sizeof(msg.type);
 
-		log_msg(LOG_INFO, "received %s in %s state",
-			MSG_TYPE_STR(msg.type), VPN_STATE_STR(vpn->state));
+		log_msg(LOG_INFO, "%s: received %s", VPN_STATE_STR(vpn->state),
+			MSG_TYPE_STR(msg.type));
 
 		switch (msg.type) {
 		case PEER_ID:
@@ -925,7 +934,8 @@ ext_sock_input(struct vpn_state *vpn)
 			process_rx_data(vpn, &msg, data_len);
 			break;
 		default:
-			log_msg(LOG_ERR, "unknown message type %d", msg.type);
+			log_msg(LOG_ERR, "%s: unknown message type %d",
+				VPN_STATE_STR(vpn->state), msg.type);
 		}
 	}
 }
@@ -973,7 +983,7 @@ dead_peer_restart(struct vpn_state *vpn, struct timespec now)
 			cur_sess_active_secs = vpn->sess_end_ts.tv_sec -
 				vpn->sess_start_ts.tv_sec;
 			vpn->sess_active_secs += cur_sess_active_secs;
-			log_msg(LOG_ERR, "%s state: peer died after %s.",
+			log_msg(LOG_ERR, "%s: peer died after %s.",
 				VPN_STATE_STR(vpn->state),
 			 time_str(cur_sess_active_secs, cur_sess_active_str,
 				  sizeof(cur_sess_active_str)));
@@ -1003,14 +1013,14 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 		}
 		break;
 	case RETRANSMIT_KEY_SWITCH_START:
-		if ((!dead_peer_restart(vpn, now)) && vpn->state == KEY_STALE) {
+		if ((!dead_peer_restart(vpn, now)) && vpn->state == MASTER_KEY_STALE) {
 			vpn->key_switch_start_retransmits++;
 			log_retransmit(vpn, KEY_SWITCH_START);
 			tx_new_public_key(vpn);
 		}
 		break;
 	case RETRANSMIT_KEY_SWITCH_ACK:
-		if ((!dead_peer_restart(vpn, now)) && vpn->state == KEY_SWITCHING) {
+		if ((!dead_peer_restart(vpn, now)) && vpn->state == SLAVE_KEY_SWITCHING) {
 			vpn->key_switch_ack_retransmits++;
 			log_retransmit(vpn, KEY_SWITCH_ACK);
 			tx_new_public_key(vpn);
@@ -1025,7 +1035,7 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 				if ((age >= vpn->max_key_age_secs) ||
 				    (vpn->key_sent_packet_count
 				     >= vpn->max_key_sent_packet_count)) {
-					change_state(vpn, KEY_STALE);
+					change_state(vpn, MASTER_KEY_STALE);
 					crypto_box_keypair(vpn->new_public_key,
 						       vpn->new_secret_key);
 					tx_new_public_key(vpn);
@@ -1040,7 +1050,8 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 		}
 		break;
 	default:
-		log_msg(LOG_ERR, "unknown timer id: %u", kev->ident);
+		log_msg(LOG_ERR, "%s: unknown timer id: %u",
+			VPN_STATE_STR(vpn->state), kev->ident);
 	}
 
 }
@@ -1062,7 +1073,7 @@ log_state(struct vpn_state *vpn)
 		cur_inactive_secs += (now.tv_sec - vpn->sess_end_ts.tv_sec);
 	}
 
-	log_msg(LOG_NOTICE, "state: %s:\n"
+	log_msg(LOG_NOTICE, "%s:\n"
 		"keys used: %" PRIu32 " sessions: %" PRIu32 "\n"
 		"time inactive/active: %s/%s\n"
 		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
