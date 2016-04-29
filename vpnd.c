@@ -38,7 +38,8 @@ typedef enum {
 	INIT,
 	KEY_STALE,
 	KEY_SWITCHING,
-	ACTIVE,
+	ACTIVE_MASTER,
+	ACTIVE_SLAVE,
 	VPN_STATE_LAST_PLUS_ONE,
 }		vpn_state;
 
@@ -47,31 +48,13 @@ const char     *vpn_state_string_array[VPN_STATE_LAST_PLUS_ONE] =
 	"INIT",
 	"KEY_STALE",
 	"KEY_SWITCHING",
-	"ACTIVE",
+	"ACTIVE MASTER",
+	"ACTIVE SLAVE",
 };
 
 #define VPN_STATE_STR(state) \
 	(((state) >= VPN_STATE_LAST_PLUS_ONE) \
 	    ? "UNKNOWN" : vpn_state_string_array[(state)])
-
-/* VPN peer role */
-typedef enum {
-	NONE,
-	INITIATOR,
-	RESPONDER,
-	VPN_ROLE_LAST_PLUS_ONE,
-}		vpn_role;
-
-const char     *vpn_role_string_array[VPN_ROLE_LAST_PLUS_ONE] =
-{
-	"NO ROLE",
-	"INITIATOR",
-	"RESPONDER",
-};
-
-#define VPN_ROLE_STR(role) \
-	(((role) >= VPN_ROLE_LAST_PLUS_ONE) \
-	    ? "UNKNOWN" : vpn_role_string_array[(role)])
 
 /* message types exchanged between peers */
 typedef enum {
@@ -138,7 +121,6 @@ struct vpn_msg {
 /* Finite state machine state data. */
 struct vpn_state {
 	vpn_state	state;
-	vpn_role	role;
 	uint32_t	peer_id;
 	uint32_t	remote_peer_id;
 	unsigned char	orig_shared_key[crypto_box_BEFORENMBYTES];
@@ -182,7 +164,6 @@ char           *get_value(char *line, size_t len);
 bool		init      (bool fflag, char *config_fname, struct vpn_state *vpn);
 void		start_protocol(struct vpn_state *vpn);
 void		change_state(struct vpn_state *vpn, vpn_state new_state);
-void		log_invalid_msg_for_role(struct vpn_state *vpn, message_type msg_type);
 void		log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type);
 void		log_retransmit(struct vpn_state *vpn, message_type msg_type);
 void		add_timer (struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval);
@@ -549,7 +530,6 @@ void
 start_protocol(struct vpn_state *vpn)
 {
 	vpn->state = INIT;
-	vpn->role = NONE;
 	randombytes_buf(&vpn->peer_id, sizeof(vpn->peer_id));
 	randombytes_buf(vpn->nonce, sizeof(vpn->nonce));
 	bzero(vpn->remote_nonce, sizeof(vpn->remote_nonce));
@@ -562,11 +542,11 @@ change_state(struct vpn_state *vpn, vpn_state new_state)
 	time_t		inactive_secs;
 	char		inactive_str[32];
 
-	log_msg(LOG_INFO, "%s: %s --> %s", VPN_ROLE_STR(vpn->role),
-		VPN_STATE_STR(vpn->state), VPN_STATE_STR(new_state));
+	log_msg(LOG_INFO, "%s --> %s", VPN_STATE_STR(vpn->state),
+		VPN_STATE_STR(new_state));
 	vpn->state = new_state;
 
-	if (vpn->state == ACTIVE) {
+	if (vpn->state == ACTIVE_MASTER || vpn->state == ACTIVE_SLAVE) {
 		clock_gettime(CLOCK_MONOTONIC, &vpn->key_start_ts);
 		vpn->key_sent_packet_count = 0;
 		vpn->keys_used++;
@@ -577,34 +557,25 @@ change_state(struct vpn_state *vpn, vpn_state new_state)
 			vpn->inactive_secs += inactive_secs;
 			vpn->peer_died = false;
 			vpn->sess_starts++;
-			log_msg(LOG_NOTICE, "%s: session #%" PRIu32 " started "
+			log_msg(LOG_NOTICE, "session #%" PRIu32 " started "
 				"in %s",
-				VPN_ROLE_STR(vpn->role), vpn->sess_starts,
+				vpn->sess_starts,
 				time_str(inactive_secs, inactive_str, sizeof(inactive_str)));
 		}
 	}
 }
 
 void
-log_invalid_msg_for_role(struct vpn_state *vpn, message_type msg_type)
-{
-	log_msg(LOG_ERR, "%s: %s message invalid for role",
-		VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(msg_type));
-}
-
-void
 log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type)
 {
-	log_msg(LOG_ERR, "%s: %s (%d) message invalid for %s state",
-		VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(msg_type), msg_type,
-		VPN_STATE_STR(vpn->state));
+	log_msg(LOG_ERR, "%s (%d) message invalid for %s state",
+		MSG_TYPE_STR(msg_type), msg_type, VPN_STATE_STR(vpn->state));
 }
 
 void
 log_retransmit(struct vpn_state *vpn, message_type msg_type)
 {
-	log_msg(LOG_NOTICE, "%s: retransmitting %s",
-		VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(msg_type));
+	log_msg(LOG_NOTICE, "retransmitting %s", MSG_TYPE_STR(msg_type));
 }
 
 void
@@ -673,7 +644,8 @@ tx_peer_id(struct vpn_state *vpn)
 		ttype = RETRANSMIT_PEER_INIT;
 		timeout_interval = 5000;
 		break;
-	case ACTIVE:
+	case ACTIVE_MASTER:
+	case ACTIVE_SLAVE:
 		ttype = ACTIVE_HEARTBEAT;
 		timeout_interval = 10000;
 		break;
@@ -760,23 +732,21 @@ process_peer_id(struct vpn_state *vpn, struct vpn_msg *msg)
 		memcpy(&tmp_remote_peer_id, msg->data, sizeof(tmp_remote_peer_id));
 		vpn->remote_peer_id = ntohl(tmp_remote_peer_id);
 		if (vpn->remote_peer_id > vpn->peer_id) {
+			log_msg(LOG_INFO, "will be key master");
 			change_state(vpn, KEY_STALE);
-			vpn->role = INITIATOR;
 			crypto_box_keypair(vpn->new_public_key, vpn->new_secret_key);
 			tx_new_public_key(vpn);
 		} else if (vpn->remote_peer_id < vpn->peer_id) {
-			vpn->role = RESPONDER;
+			//Stay in INIT
+				log_msg(LOG_INFO, "will be key slave");
 		} else {
+			log_msg(LOG_INFO, "got same peer ID from remote, trying again.");
 			randombytes_buf(&vpn->peer_id, sizeof(vpn->peer_id));
 			tx_peer_id(vpn);
 		}
-
-		log_msg(LOG_INFO, "local: %" PRIu32 " peer: %" PRIu32 " role: %s",
-			vpn->peer_id, vpn->remote_peer_id,
-			VPN_ROLE_STR(vpn->role));
-
 		break;
-	case ACTIVE:
+	case ACTIVE_MASTER:
+	case ACTIVE_SLAVE:
 		clock_gettime(CLOCK_MONOTONIC, &vpn->peer_last_heartbeat_ts);
 		break;
 
@@ -790,23 +760,14 @@ process_key_switch_start(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	switch (vpn->state) {
 	case INIT:
-	case ACTIVE:
-		if (vpn->role == INITIATOR) {
-			log_invalid_msg_for_role(vpn, msg->type);
+	case ACTIVE_SLAVE:
+		crypto_box_keypair(vpn->new_public_key, vpn->new_secret_key);
+		if (crypto_box_beforenm(vpn->new_shared_key, msg->data,
+					vpn->new_secret_key) != 0) {
+			log_msg(LOG_ERR, "couldn't create shared key");
 		} else {
-			if (vpn->role == NONE) {
-				vpn->role = RESPONDER;
-				log_msg(LOG_INFO, "Assuming %s role",
-					VPN_ROLE_STR(vpn->role));
-			}
-			crypto_box_keypair(vpn->new_public_key, vpn->new_secret_key);
-			if (crypto_box_beforenm(vpn->new_shared_key, msg->data,
-						vpn->new_secret_key) != 0) {
-				log_msg(LOG_ERR, "couldn't create shared key");
-			} else {
-				change_state(vpn, KEY_SWITCHING);
-				tx_new_public_key(vpn);
-			}
+			change_state(vpn, KEY_SWITCHING);
+			tx_new_public_key(vpn);
 		}
 		break;
 	default:
@@ -819,17 +780,13 @@ process_key_switch_ack(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	switch (vpn->state) {
 	case KEY_STALE:
-		if (vpn->role == INITIATOR) {
-			tx_key_init_done(vpn);
-			if (crypto_box_beforenm(vpn->cur_shared_key, msg->data,
-						vpn->new_secret_key) != 0) {
-				log_msg(LOG_ERR, "couldn't create shared key");
-			} else {
-				change_state(vpn, ACTIVE);
-				tx_peer_id(vpn);
-			}
+		tx_key_init_done(vpn);
+		if (crypto_box_beforenm(vpn->cur_shared_key, msg->data,
+					vpn->new_secret_key) != 0) {
+			log_msg(LOG_ERR, "couldn't create shared key");
 		} else {
-			log_invalid_msg_for_role(vpn, msg->type);
+			change_state(vpn, ACTIVE_MASTER);
+			tx_peer_id(vpn);
 		}
 		break;
 	default:
@@ -842,14 +799,10 @@ process_key_switch_done(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	switch (vpn->state) {
 	case KEY_SWITCHING:
-		if (vpn->role == RESPONDER) {
-			memcpy(vpn->cur_shared_key, vpn->new_shared_key,
-			       sizeof(vpn->cur_shared_key));
-			change_state(vpn, ACTIVE);
-			tx_peer_id(vpn);
-		} else {
-			log_invalid_msg_for_role(vpn, msg->type);
-		}
+		memcpy(vpn->cur_shared_key, vpn->new_shared_key,
+		       sizeof(vpn->cur_shared_key));
+		change_state(vpn, ACTIVE_SLAVE);
+		tx_peer_id(vpn);
 		break;
 	default:
 		log_invalid_msg_for_state(vpn, msg->type);
@@ -870,7 +823,8 @@ void
 process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 {
 	switch (vpn->state) {
-	case ACTIVE:
+	case ACTIVE_MASTER:
+	case ACTIVE_SLAVE:
 		if (write(vpn->ctrl_sock, msg->data, data_len) < 0)
 			log_msg(LOG_ERR, "couldn't write to tunnel: %s",
 				strerror(errno));
@@ -948,9 +902,8 @@ ext_sock_input(struct vpn_state *vpn)
 	if (ok) {
 		data_len = ciphertext_len - crypto_box_MACBYTES - sizeof(msg.type);
 
-		log_msg(LOG_INFO, "%s: received %s in %s state",
-			VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(msg.type),
-			VPN_STATE_STR(vpn->state));
+		log_msg(LOG_INFO, "received %s in %s state",
+			MSG_TYPE_STR(msg.type), VPN_STATE_STR(vpn->state));
 
 		switch (msg.type) {
 		case PEER_ID:
@@ -1064,9 +1017,10 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 		}
 		break;
 	case ACTIVE_HEARTBEAT:
-		if ((!dead_peer_restart(vpn, now)) && vpn->state == ACTIVE) {
-			tx_peer_id(vpn);
-			if (vpn->role == INITIATOR) {
+		if (!dead_peer_restart(vpn, now)) {
+			switch (vpn->state) {
+			case ACTIVE_MASTER:
+				tx_peer_id(vpn);
 				age = now.tv_sec - vpn->key_start_ts.tv_sec;
 				if ((age >= vpn->max_key_age_secs) ||
 				    (vpn->key_sent_packet_count
@@ -1076,6 +1030,12 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 						       vpn->new_secret_key);
 					tx_new_public_key(vpn);
 				}
+				break;
+			case ACTIVE_SLAVE:
+				tx_peer_id(vpn);
+				break;
+			default:
+				break;
 			}
 		}
 		break;
@@ -1096,20 +1056,20 @@ log_state(struct vpn_state *vpn)
 	cur_inactive_secs = vpn->inactive_secs;
 	cur_sess_active_secs = vpn->sess_active_secs;
 
-	if (vpn->state == ACTIVE) {
+	if (vpn->state == ACTIVE_MASTER || vpn->state == ACTIVE_SLAVE) {
 		cur_sess_active_secs += (now.tv_sec - vpn->sess_start_ts.tv_sec);
 	} else {
 		cur_inactive_secs += (now.tv_sec - vpn->sess_end_ts.tv_sec);
 	}
 
-	log_msg(LOG_NOTICE, "%s (%s):\n"
-		"keys used: %" PRIu32 " session starts: %" PRIu32 "\n"
+	log_msg(LOG_NOTICE, "state: %s:\n"
+		"keys used: %" PRIu32 " sessions: %" PRIu32 "\n"
 		"time inactive/active: %s/%s\n"
 		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
 	"retransmits (pi/kis/kia/kss/ksa): %" PRIu32 "/%" PRIu32 "/%" PRIu32
 		"/%" PRIu32 "/%" PRIu32 "\n"
 		"last peer message: %" PRIu32 " sec. ago",
-		VPN_ROLE_STR(vpn->role), VPN_STATE_STR(vpn->state),
+		VPN_STATE_STR(vpn->state),
 		vpn->keys_used, vpn->sess_starts,
 		time_str(cur_inactive_secs, cur_inactive_str,
 			 sizeof(cur_inactive_str)),
