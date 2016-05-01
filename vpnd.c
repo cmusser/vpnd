@@ -38,6 +38,7 @@ typedef enum {
 	INIT,
 	MASTER_KEY_STALE,
 	SLAVE_KEY_SWITCHING,
+	MASTER_KEY_READY,
 	ACTIVE_MASTER,
 	ACTIVE_SLAVE,
 	VPN_STATE_LAST_PLUS_ONE,
@@ -48,6 +49,7 @@ const char     *vpn_state_string_array[VPN_STATE_LAST_PLUS_ONE] =
 	"INIT",
 	"MASTER KEY STALE",
 	"SLAVE KEY SWITCHING",
+	"MASTER KEY READY",
 	"ACTIVE (MASTER)",
 	"ACTIVE (SLAVE)",
 };
@@ -61,7 +63,7 @@ typedef enum {
 	PEER_ID,
 	KEY_SWITCH_START,
 	KEY_SWITCH_ACK,
-	KEY_SWITCH_DONE,
+	KEY_READY,
 	DEBUG_STRING,
 	DATA,
 	MSG_TYPE_LAST_PLUS_ONE,
@@ -72,7 +74,7 @@ const char     *message_type_string_array[MSG_TYPE_LAST_PLUS_ONE] =
 	"PEER_ID",
 	"KEY_SWITCH_START",
 	"KEY_SWITCH_ACK",
-	"KEY_SWITCH_DONE",
+	"KEY_READY",
 	"DEBUG_STRING",
 	"DATA",
 };
@@ -86,6 +88,7 @@ typedef enum {
 	RETRANSMIT_PEER_INIT,
 	RETRANSMIT_KEY_SWITCH_START,
 	RETRANSMIT_KEY_SWITCH_ACK,
+	RETRANSMIT_KEY_READY,
 	ACTIVE_HEARTBEAT,
 	TIMER_TYPE_LAST_PLUS_ONE,
 }		timer_type;
@@ -95,6 +98,7 @@ const char     *timer_type_string_array[TIMER_TYPE_LAST_PLUS_ONE] =
 	"RETRANSMIT_PEER_INIT",
 	"RETRANSMIT_KEY_SWITCH_START",
 	"RETRANSMIT_KEY_SWITCH_ACK",
+	"RETRANSMIT_KEY_READY",
 	"ACTIVE_HEARTBEAT",
 };
 
@@ -137,6 +141,7 @@ struct vpn_state {
 	unsigned char	new_secret_key[crypto_box_SECRETKEYBYTES];
 	unsigned char	new_public_key[crypto_box_PUBLICKEYBYTES];
 	unsigned char	new_shared_key[crypto_box_BEFORENMBYTES];
+	unsigned char	ready_retrans_key[crypto_box_BEFORENMBYTES];
 	unsigned char	nonce[crypto_box_NONCEBYTES];
 	unsigned char	remote_nonce[crypto_box_NONCEBYTES];
 	int		ext_sock;
@@ -146,10 +151,9 @@ struct vpn_state {
 	uint32_t	rx_bytes;
 	uint32_t	tx_bytes;
 	uint32_t	peer_init_retransmits;
-	uint32_t	key_init_start_retransmits;
-	uint32_t	key_init_ack_retransmits;
 	uint32_t	key_switch_start_retransmits;
 	uint32_t	key_switch_ack_retransmits;
+	uint32_t	key_ready_retransmits;
 	uint32_t	keys_used;
 	uint32_t	sess_starts;
 	bool		peer_died;
@@ -170,14 +174,11 @@ void		add_timer (struct vpn_state *vpn, timer_type ttype, intptr_t timeout_inter
 bool		tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len);
 void		tx_peer_id(struct vpn_state *vpn);
 void		tx_new_public_key(struct vpn_state *vpn);
-void		tx_key_init_done(struct vpn_state *vpn);
+void		tx_key_ready(struct vpn_state *vpn);
 void		process_peer_id(struct vpn_state *vpn, struct vpn_msg *msg);
-void		process_key_init_start(struct vpn_state *vpn, struct vpn_msg *msg);
-void		process_key_init_ack(struct vpn_state *vpn, struct vpn_msg *msg);
-void		process_key_init_done(struct vpn_state *vpn, struct vpn_msg *msg);
 void		process_key_switch_start(struct vpn_state *vpn, struct vpn_msg *msg);
 void		process_key_switch_ack(struct vpn_state *vpn, struct vpn_msg *msg);
-void		process_key_switch_done(struct vpn_state *vpn, struct vpn_msg *msg);
+void		process_key_ready(struct vpn_state *vpn, struct vpn_msg *msg);
 void		process_debug_string(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len);
 
 void		process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len);
@@ -506,10 +507,9 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 			}
 			vpn->rx_bytes = vpn->tx_bytes =
 				vpn->peer_init_retransmits =
-				vpn->key_init_start_retransmits =
-				vpn->key_init_ack_retransmits =
 				vpn->key_switch_start_retransmits =
 				vpn->key_switch_ack_retransmits =
+				vpn->key_ready_retransmits =
 				vpn->keys_used = vpn->sess_starts =
 				vpn->sess_active_secs = vpn->inactive_secs = 0;
 
@@ -602,6 +602,7 @@ bool
 tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 {
 	bool		ok;
+	unsigned char  *key;
 	unsigned char	ciphertext[crypto_box_MACBYTES + sizeof(struct vpn_msg)];
 	size_t		payload_len, ciphertext_len;
 	struct iovec	tx_iovec[2];
@@ -610,8 +611,10 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 	payload_len = sizeof(unsigned char) + data_len;
 	ciphertext_len = payload_len + crypto_box_MACBYTES;
 
+	key = (vpn->state == MASTER_KEY_READY && msg->type == KEY_READY)
+		? vpn->ready_retrans_key : vpn->cur_shared_key;
 	if (crypto_box_easy_afternm(ciphertext, (unsigned char *)msg,
-		       payload_len, vpn->nonce, vpn->cur_shared_key) != 0) {
+				    payload_len, vpn->nonce, key) != 0) {
 		ok = false;
 		log_msg(LOG_ERR, "%s: encryption failed", VPN_STATE_STR(vpn->state));
 	}
@@ -704,7 +707,7 @@ tx_new_public_key(struct vpn_state *vpn)
 }
 
 void
-tx_key_init_done(struct vpn_state *vpn)
+tx_key_ready(struct vpn_state *vpn)
 {
 	bool		ok;
 	struct vpn_msg	msg;
@@ -713,11 +716,11 @@ tx_key_init_done(struct vpn_state *vpn)
 	ok = true;
 	switch (vpn->state) {
 	case MASTER_KEY_STALE:
-		type = KEY_SWITCH_DONE;
+		type = KEY_READY;
 		break;
 	default:
 		ok = false;
-		log_msg(LOG_ERR, "%s: may not transmit key init done in state",
+		log_msg(LOG_ERR, "%s: may not transmit KEY_READY in state",
 			VPN_STATE_STR(vpn->state));
 	}
 
@@ -743,14 +746,18 @@ process_peer_id(struct vpn_state *vpn, struct vpn_msg *msg)
 			crypto_box_keypair(vpn->new_public_key, vpn->new_secret_key);
 			tx_new_public_key(vpn);
 		} else if (vpn->remote_peer_id < vpn->peer_id) {
-			//Stay in INIT
-				log_msg(LOG_INFO, "will be key slave");
+			/* Stay in INIT state */
+			log_msg(LOG_INFO, "will be key slave");
 		} else {
 			log_msg(LOG_INFO, "got same peer ID from remote, trying again.");
 			randombytes_buf(&vpn->peer_id, sizeof(vpn->peer_id));
 			tx_peer_id(vpn);
 		}
 		break;
+	case MASTER_KEY_READY:
+		change_state(vpn, ACTIVE_MASTER);
+		tx_peer_id(vpn);
+		/* fallthrough */
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
 		clock_gettime(CLOCK_MONOTONIC, &vpn->peer_last_heartbeat_ts);
@@ -787,14 +794,15 @@ process_key_switch_ack(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	switch (vpn->state) {
 	case MASTER_KEY_STALE:
-		tx_key_init_done(vpn);
+		memcpy(vpn->ready_retrans_key, vpn->cur_shared_key,
+		       sizeof(vpn->ready_retrans_key));
+		tx_key_ready(vpn);
 		if (crypto_box_beforenm(vpn->cur_shared_key, msg->data,
 					vpn->new_secret_key) != 0) {
 			log_msg(LOG_ERR, "%s couldn't create shared key",
 				VPN_STATE_STR(vpn->state));
 		} else {
-			change_state(vpn, ACTIVE_MASTER);
-			tx_peer_id(vpn);
+			change_state(vpn, MASTER_KEY_READY);
 		}
 		break;
 	default:
@@ -803,7 +811,7 @@ process_key_switch_ack(struct vpn_state *vpn, struct vpn_msg *msg)
 }
 
 void
-process_key_switch_done(struct vpn_state *vpn, struct vpn_msg *msg)
+process_key_ready(struct vpn_state *vpn, struct vpn_msg *msg)
 {
 	switch (vpn->state) {
 	case SLAVE_KEY_SWITCHING:
@@ -831,6 +839,10 @@ void
 process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 {
 	switch (vpn->state) {
+	case MASTER_KEY_READY:
+		change_state(vpn, ACTIVE_MASTER);
+		tx_peer_id(vpn);
+		/* fallthrough */
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
 		if (write(vpn->ctrl_sock, msg->data, data_len) < 0)
@@ -927,8 +939,8 @@ ext_sock_input(struct vpn_state *vpn)
 		case KEY_SWITCH_ACK:
 			process_key_switch_ack(vpn, &msg);
 			break;
-		case KEY_SWITCH_DONE:
-			process_key_switch_done(vpn, &msg);
+		case KEY_READY:
+			process_key_ready(vpn, &msg);
 			break;
 		case DEBUG_STRING:
 			process_debug_string(vpn, &msg, data_len);
@@ -1029,6 +1041,13 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 			tx_new_public_key(vpn);
 		}
 		break;
+	case RETRANSMIT_KEY_READY:
+		if ((!dead_peer_restart(vpn, now)) && vpn->state == MASTER_KEY_READY) {
+			vpn->key_ready_retransmits++;
+			log_retransmit(vpn, KEY_READY);
+			tx_key_ready(vpn);
+		}
+		break;
 	case ACTIVE_HEARTBEAT:
 		if (!dead_peer_restart(vpn, now)) {
 			switch (vpn->state) {
@@ -1080,8 +1099,8 @@ log_state(struct vpn_state *vpn)
 		"keys used: %" PRIu32 " sessions: %" PRIu32 "\n"
 		"time inactive/active: %s/%s\n"
 		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
-	"retransmits (pi/kis/kia/kss/ksa): %" PRIu32 "/%" PRIu32 "/%" PRIu32
-		"/%" PRIu32 "/%" PRIu32 "\n"
+		"retransmits (pi/kss/ksa/kid): %" PRIu32
+		"/%" PRIu32 "/%" PRIu32 "/%" PRIu32 "\n"
 		"last peer message: %" PRIu32 " sec. ago",
 		VPN_STATE_STR(vpn->state),
 		vpn->keys_used, vpn->sess_starts,
@@ -1091,8 +1110,8 @@ log_state(struct vpn_state *vpn)
 			 sizeof(cur_sess_active_str)),
 		vpn->rx_bytes, vpn->tx_bytes,
 		vpn->peer_init_retransmits,
-	     vpn->key_init_start_retransmits, vpn->key_init_ack_retransmits,
 	 vpn->key_switch_start_retransmits, vpn->key_switch_ack_retransmits,
+		vpn->key_ready_retransmits,
 		(now.tv_sec - vpn->peer_last_heartbeat_ts.tv_sec));
 }
 
