@@ -308,6 +308,7 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 	bool		ok = true;
 	FILE           *config_file;
 	char		line      [256] = {'\0'};
+	char		tunnel_device[32] = {'\0'};
 	char		local_sk_hex[(crypto_box_SECRETKEYBYTES * 2) + 1] = {'\0'};
 	char		local_port[6] = {'\0'};
 	char		remote_pk_hex[(crypto_box_PUBLICKEYBYTES * 2) + 1] = {'\0'};
@@ -317,6 +318,8 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 	char		max_key_sent_packet_count[16] = {'\0'};
 	const char     *num_err;
 	struct config_param c[] = {
+		{"tunnel device", "device:", sizeof("device:"),
+		tunnel_device, sizeof(tunnel_device), "/dev/tun0"},
 		{"local secret key", "local_sk:", sizeof("local_sk:"),
 		local_sk_hex, sizeof(local_sk_hex), NULL},
 		{"local port", "local_port:", sizeof("local_port:"),
@@ -462,7 +465,7 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 		}
 		/* Set up control socket */
 		if (ok) {
-			vpn->ctrl_sock = open("/dev/tun0", O_RDWR);
+			vpn->ctrl_sock = open(tunnel_device, O_RDWR);
 			if (vpn->ctrl_sock < 0) {
 				ok = false;
 				log_msg(LOG_ERR, "couldn't open tunnel: %s", strerror(errno));
