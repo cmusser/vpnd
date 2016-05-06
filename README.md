@@ -4,22 +4,24 @@ tun-based VPN for BSD
 ## Overview
 
 vpnd provides an encrypted tunnel between two BSD machines serving as
-security gateways. It uses security primitives provided by the NaCl
-cryptography library uses frequently changing ephemeral keys to provide
-"perfect forward secrecy". This means a future compromise of long-term
+security gateways, or between a single client and a security gateway.
+It uses security primitives provided by the NaCl cryptography library
+and frequently changes the encryption keys. The latter intends to
+achieve "perfect forward secrecy", meaning a future compromise of long-term
 keys does not compromise the security of past sessions. The persistently
-stored keys are only used to start (or restart) the communication.
+stored keys are only used to start (or restart) communication between the
+two peers.
 
-Other modes of operation, for example layer 2 tunneling, or a mode in
-which a client host directly attaches to the VPN are possible, but have
-not been explored yet.
+Other modes of operation, for example layer 2 tunneling are possible,
+but have not been explored yet.
 
-vpnd is designed to be simple and hopefully secure as a result of
-that. It requires little configuration and has only one mode of
-operation. It was inspired by other, similar projects, principally
-QuickTUN, whose author helpfully gave some advice on network
-configuration while this project was still in the planning stage.
+vpnd is designed to be simple and, as a result, secure. It requires little
+configuration and, at the moment, has only one mode of operation. It was
+inspired by other, similar projects, principally QuickTUN, whose author
+helpfully gave some advice on network configuration while this project was
+still in the planning stage.
 
+## Features
 
 - No reduced security modes: no options for unencrypted transport
   unchanging nonces. Ephemeral keys are always used.
@@ -35,9 +37,10 @@ configuration while this project was still in the planning stage.
 - Doesn't run an ancillary script to set up the networking. An
   example script is provided.
 
-- Easy to configure on a pair of router hosts, but also can be used on
-  a client. This is harder to manage for lots of clients because the
-  process is currently designed to talk to a single peer.
+- Easy to configure on a pair of gateway hosts, but also can be used on
+  a gateway and single client. Managing many clients is harder because the
+  process is currently designed to talk to a single peer. Extending the
+  system to be a full blown VPN access concentrator is possible.
 
 
 
@@ -49,8 +52,7 @@ configuration while this project was still in the planning stage.
 
 ## Usage
 
-### Configuration And Startup
-
+### Basic Configuration and Startup
 The configuration file (```vpnd.conf``` in the current directory, by
 default) contains one parameter per line, in the following format:
 
@@ -66,20 +68,7 @@ default) contains one parameter per line, in the following format:
 4. Start the server (```vpnd```). When getting a setup working
    initially, foreground mode (```-f```) is helpful.
 
-### Complete List Of Parameters
-
-|Parameter Name|Description|Required?|
-|---|---|---|
-|device|The tunnel device path  |no, defaults to ```/dev/tun0```.|
-|local_sk|The local secret key|yes, use values from ```keypair``` program.|
-|local_port|local UDP port to listen on|no, defaults to 1337.|
-|remote_pk|The peer's public key|yes, use values from ```keypair``` program|
-|remote_host|hostname or IP address of|yes|
-|remote_port|UDP port on peer to listen on|no, defaults to 1337.|
-|max_key_age|Maximum age for ephemeral key, in seconds.|no, defaults to 60 seconds.|
-|max_key_packets|Maximum number of packets that can be sent with ephemeral key|no defaults to 100,000.|
-
-### Networking
+### Network Setup
 
 After the server processes are started, secure communication between
 them should work. If they were started in foreground mode, you can
@@ -105,11 +94,24 @@ commands to run, but the procedure is outlined below:
    on a pair of laptops using the test script, run the following pair
    of commands, one on the client and the other on the server:
 
-       test/test.sh -iwlan0 -mclient
-       test/test.sh -iwlan0 -mserver
+        test/test.sh -iwlan0 -mclient
+        test/test.sh -iwlan0 -mserver
 
-   The -iwlan0 can be omitted after the first run.
+   The ```-iwlan0``` can be omitted after the first run.
 
 4. Communication between the two private networks should now be
-   possible. Pings should work and the netcat(1) program started
+   possible. Pings should work and the ```netcat(1)``` program started
    by the test script can be used for verifying real two-way traffic.
+
+### Complete List Of Configuration Parameters
+
+|Parameter Name|Description|Required?|
+|---|---|---|
+|device|The tunnel device path  |no, defaults to ```/dev/tun0```.|
+|local_sk|The local secret key|yes, use values from ```keypair``` program.|
+|local_port|local UDP port to listen on|no, defaults to 1337.|
+|remote_pk|The peer's public key|yes, use values from ```keypair``` program|
+|remote_host|hostname or IP address of|yes|
+|remote_port|UDP port on peer to listen on|no, defaults to 1337.|
+|max_key_age|Maximum age for ephemeral key, in seconds.|no, defaults to 60 seconds.|
+|max_key_packets|Maximum number of packets that can be sent with ephemeral key|no defaults to 100,000.|
