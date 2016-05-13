@@ -71,6 +71,7 @@ default) contains one parameter per line, in the following format:
 |Parameter Name|Description|Required?|
 |---|---|---|
 |device|The tunnel device path  |no, defaults to ```/dev/tun0```.|
+|stats_prefix|prefix to use for Graphite data  |no, defaults to value from```gethostname(3)```.|
 |local_sk|The local secret key|yes, use values from ```keypair``` program.|
 |local_port|local UDP port to listen on|no, defaults to 1337.|
 |remote_pk|The peer's public key|yes, use values from ```keypair``` program|
@@ -111,5 +112,16 @@ commands to run, but the procedure is outlined below:
    The -iwlan0 can be omitted after the first run.
 
 4. Communication between the two private networks should now be
-   possible. Pings should work and the netcat(1) program started
+   possible. Pings should work and the ```netcat(1)``` program started
    by the test script can be used for verifying real two-way traffic.
+
+### Statistics and Diagnostics
+
+The current state is sent to the current logging output if the process receives
+the ```USR1``` signal or if ```stats``` is typed into the console in foreground
+mode. Graphite plaintext formatted statistics are available by connecting to
+the ```/var/run/vpnd_stats.sock``` UNIX domain socket. An example of doing this
+is:
+    sudo nc -U /var/run/vpnd_stats.sock
+or
+    socat - UNIX-CONNECT:/var/run/vpnd_stats.sock

@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <sys/event.h>
 #include <sys/uio.h>
+#include <sys/un.h>
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -127,6 +128,7 @@ struct vpn_state {
 	vpn_state	state;
 	uint32_t	peer_id;
 	uint32_t	remote_peer_id;
+	char		stats_prefix[64];
 	unsigned char	orig_shared_key[crypto_box_BEFORENMBYTES];
 	unsigned char	cur_shared_key[crypto_box_BEFORENMBYTES];
 	struct timespec	key_start_ts;
@@ -146,7 +148,8 @@ struct vpn_state {
 	unsigned char	remote_nonce[crypto_box_NONCEBYTES];
 	int		ext_sock;
 	int		ctrl_sock;
-	struct kevent	kev_changes[5];
+	int		stats_sock;
+	struct kevent	kev_changes[6];
 	uint32_t	kev_change_count;
 	uint32_t	rx_bytes;
 	uint32_t	tx_bytes;
@@ -184,6 +187,7 @@ void		process_debug_string(struct vpn_state *vpn, struct vpn_msg *msg, size_t da
 void		process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len);
 void		ext_sock_input(struct vpn_state *vpn);
 void		ctrl_sock_input(struct vpn_state *vpn);
+void		stats_sock_input(struct vpn_state *vpn);
 void		stdin_input(struct vpn_state *vpn);
 bool		dead_peer_restart(struct vpn_state *vpn, struct timespec now);
 void		process_timeout(struct vpn_state *vpn, struct kevent *kev);
@@ -321,6 +325,8 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 	struct config_param c[] = {
 		{"tunnel device", "device:", sizeof("device:"),
 		tunnel_device, sizeof(tunnel_device), "/dev/tun0"},
+		{"stats prefix", "stats_prefix:", sizeof("stats_prefix:"),
+		vpn->stats_prefix, sizeof(vpn->stats_prefix), "<hostname>"},
 		{"local secret key", "local_sk:", sizeof("local_sk:"),
 		local_sk_hex, sizeof(local_sk_hex), NULL},
 		{"local port", "local_port:", sizeof("local_port:"),
@@ -340,12 +346,14 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 	size_t		bin_len;
 	unsigned char	local_sk_bin[crypto_box_SECRETKEYBYTES];
 	unsigned char	remote_pk_bin[crypto_box_PUBLICKEYBYTES];
-	unsigned int	i;
+	unsigned int	i , j;
 	struct addrinfo *local_addrinfo = NULL;
 	char		local_info[INET6_ADDRSTRLEN + 7];
 	struct addrinfo *remote_addrinfo = NULL;
 	char		remote_info[INET6_ADDRSTRLEN + 7];
 	int		ioctl_data;
+	struct sockaddr_un stats_addr;
+	char           *stats_path = "/var/run/vpnd_stats.sock";
 
 	config_file = fopen(config_fname, "r");
 
@@ -372,8 +380,16 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 					ok = false;
 					log_msg(LOG_ERR, "%s not specified", c[i].desc);
 				} else {
-					strlcpy(c[i].value, c[i].default_value,
-						c[i].value_sz);
+					if (strcmp(c[i].name, "stats_prefix:") == 0) {
+						gethostname(c[i].value, c[i].value_sz);
+						for (j = 0; j < c[i].value_sz; j++) {
+							if (c[i].value[j] == '.')
+								c[i].value[j] = '_';
+						}
+					} else {
+						strlcpy(c[i].value, c[i].default_value,
+							c[i].value_sz);
+					}
 				}
 			}
 		}
@@ -488,6 +504,33 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 					strerror(errno));
 			}
 		}
+		/* open stats socket */
+		if (ok) {
+			if ((vpn->stats_sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+				ok = false;
+				log_msg(LOG_ERR, "couldn't create stats socket -- %s",
+					strerror(errno));
+			}
+		}
+		if (ok) {
+			memset(&stats_addr, 0, sizeof(stats_addr));
+			stats_addr.sun_family = AF_UNIX;
+			strlcpy(stats_addr.sun_path, stats_path, sizeof(stats_addr.sun_path));
+			unlink(stats_path);
+		}
+		if (bind(vpn->stats_sock, (struct sockaddr *)&stats_addr,
+			 sizeof(stats_addr)) == -1) {
+			ok = false;
+			log_msg(LOG_ERR, "couldn't bind stats socket -- %s",
+				strerror(errno));
+		}
+		if (ok) {
+			if (listen(vpn->stats_sock, 5) == -1) {
+				ok = false;
+				log_msg(LOG_ERR, "couldn't listen stats socket -- %s",
+					strerror(errno));
+			}
+		}
 		if (ok) {
 			log_msg(LOG_NOTICE, "connected: %s <--> %s", local_info, remote_info);
 			EV_SET(&vpn->kev_changes[0], vpn->ext_sock,
@@ -496,12 +539,15 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 			EV_SET(&vpn->kev_changes[1], vpn->ctrl_sock,
 			       EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
 			vpn->kev_change_count++;
-			EV_SET(&vpn->kev_changes[2], SIGUSR1,
+			EV_SET(&vpn->kev_changes[2], vpn->stats_sock,
+			       EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
+			vpn->kev_change_count++;
+			EV_SET(&vpn->kev_changes[3], SIGUSR1,
 			       EVFILT_SIGNAL, EV_ADD | EV_ENABLE, 0, 0, 0);
 			vpn->kev_change_count++;
 			signal(SIGUSR1, SIG_IGN);
 			if (fflag) {
-				EV_SET(&vpn->kev_changes[3], STDIN_FILENO,
+				EV_SET(&vpn->kev_changes[4], STDIN_FILENO,
 				  EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
 				vpn->kev_change_count++;
 			}
@@ -956,6 +1002,46 @@ ext_sock_input(struct vpn_state *vpn)
 }
 
 void
+stats_sock_input(struct vpn_state *vpn)
+{
+	int		client_fd;
+	time_t		n;
+	long long	now;
+	char		stats_buf [1024];
+
+	client_fd = accept(vpn->stats_sock, NULL, NULL);
+	if (client_fd > 0) {
+		time(&n);
+		now = (long long)n;
+		snprintf(stats_buf, sizeof(stats_buf),
+			 "%s.keys %" PRIu32 " %lld\n"
+			 "%s.keys %" PRIu32 " %lld\n"
+			 "%s.sessions %" PRIu32 " %lld\n"
+			 "%s.rx %" PRIu32 " %lld\n"
+			 "%s.tx %" PRIu32 " %lld\n"
+			 "%s.peer_id_retransmits %" PRIu32 " %lld\n"
+			 "%s.key_switch_start_retransmits %" PRIu32 " %lld\n"
+			 "%s.key_ack_retransmits %" PRIu32 " %lld\n"
+			 "%s.key_ready_retransmits %" PRIu32 " %lld\n",
+			 vpn->stats_prefix, vpn->keys_used, now,
+			 vpn->stats_prefix, vpn->keys_used, now,
+			 vpn->stats_prefix, vpn->sess_starts, now,
+			 vpn->stats_prefix, vpn->rx_bytes, now,
+			 vpn->stats_prefix, vpn->tx_bytes, now,
+			 vpn->stats_prefix, vpn->peer_init_retransmits, now,
+		  vpn->stats_prefix, vpn->key_switch_start_retransmits, now,
+		    vpn->stats_prefix, vpn->key_switch_ack_retransmits, now,
+			 vpn->stats_prefix, vpn->key_ready_retransmits, now);
+		write(client_fd, stats_buf, strlen(stats_buf));
+		close(client_fd);
+	} else {
+		log_msg(LOG_ERR, "couldn't accept connection on stats socket -- %s",
+			strerror(errno));
+	}
+
+}
+
+void
 stdin_input(struct vpn_state *vpn)
 {
 	struct vpn_msg	msg;
@@ -1099,7 +1185,7 @@ log_state(struct vpn_state *vpn)
 		"keys used: %" PRIu32 " sessions: %" PRIu32 "\n"
 		"time inactive/active: %s/%s\n"
 		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
-		"retransmits (pi/kss/ksa/kid): %" PRIu32
+		"retransmits (pi/kss/ksa/kr): %" PRIu32
 		"/%" PRIu32 "/%" PRIu32 "/%" PRIu32 "\n"
 		"last peer message: %" PRIu32 " sec. ago",
 		VPN_STATE_STR(vpn->state),
@@ -1146,6 +1232,8 @@ run(struct vpn_state *vpn)
 						ext_sock_input(vpn);
 					else if (event.ident == vpn->ctrl_sock)
 						ctrl_sock_input(vpn);
+					else if (event.ident == vpn->stats_sock)
+						stats_sock_input(vpn);
 					else if (event.ident == STDIN_FILENO)
 						stdin_input(vpn);
 					break;
