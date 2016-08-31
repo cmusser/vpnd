@@ -1278,7 +1278,7 @@ main(int argc, char *argv[])
 			config_fname = optarg;
 			break;
 		default:
-			fprintf(stderr, "usage: radnsd [-fdc]\n");
+			fprintf(stderr, "usage: vpnd [-fdc]\n");
 			exit(EXIT_FAILURE);
 		}
 	}
