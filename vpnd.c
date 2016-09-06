@@ -164,7 +164,7 @@ struct vpn_state {
 
 int		log_upto;
 bool		fflag = false;
-int		dflag = 0;
+int		vflag = 0;
 void		log_msg   (int priority, const char *msg,...);
 char           *time_str(time_t time, char *time_str, size_t len);
 char           *get_value(char *line, size_t len);
@@ -1266,13 +1266,13 @@ main(int argc, char *argv[])
 	struct vpn_state vpn;
 	char           *config_fname;
 
-	opts = "dfc:";
+	opts = "vfc:";
 	config_fname = "vpnd.conf";
 
 	while ((ch = getopt(argc, argv, opts)) != -1) {
 		switch (ch) {
-		case 'd':
-			dflag++;
+		case 'v':
+			vflag++;
 			break;
 		case 'f':
 			fflag = true;
@@ -1290,7 +1290,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	switch (dflag) {
+	switch (vflag) {
 	case 0:
 		log_upto = LOG_NOTICE;
 		break;
