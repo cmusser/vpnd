@@ -652,6 +652,7 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 	unsigned char	ciphertext[crypto_box_MACBYTES + sizeof(struct vpn_msg)];
 	size_t		payload_len, ciphertext_len;
 	struct iovec	tx_iovec[2];
+	ssize_t		tx_len;
 
 	ok = true;
 	payload_len = sizeof(unsigned char) + data_len;
@@ -670,11 +671,12 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 		tx_iovec[1].iov_base = ciphertext;
 		tx_iovec[1].iov_len = ciphertext_len;
 
-		if (writev(vpn->ext_sock, tx_iovec, COUNT_OF(tx_iovec)) == -1) {
+		if ((tx_len = writev(vpn->ext_sock, tx_iovec, COUNT_OF(tx_iovec))) == -1) {
 			ok = false;
 			log_msg(LOG_ERR, "%sL write failed -- %s",
 				VPN_STATE_STR(vpn->state), strerror(errno));
 		} else {
+			log_msg(LOG_DEBUG, "%zd bytes written", tx_len);
 			vpn->key_sent_packet_count++;
 		}
 
@@ -948,6 +950,7 @@ ext_sock_input(struct vpn_state *vpn)
 				VPN_STATE_STR(vpn->state), strerror(errno));
 	}
 	if (ok) {
+		log_msg(LOG_DEBUG, "%zd bytes read", rx_len);
 		if (sodium_compare(vpn->remote_nonce, rx_nonce, crypto_box_NONCEBYTES) > -1) {
 			ok = false;
 			log_msg(LOG_ERR, "%s: received nonce (%s)<= previous (%s)",
@@ -1279,6 +1282,10 @@ main(int argc, char *argv[])
 			break;
 		default:
 			fprintf(stderr, "usage: vpnd [-fdc]\n");
+			fprintf(stderr, "  -f: foreground mode (default: daemon)\n");
+			fprintf(stderr, "  -v: verbose (default: NOTICE; 1 -v is\n");
+			fprintf(stderr, "      INFO, >1 -v is DEBUG)\n");
+			fprintf(stderr, "  -c: config file (default: vpnd.conf)\n");
 			exit(EXIT_FAILURE);
 		}
 	}
