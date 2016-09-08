@@ -116,7 +116,7 @@ struct config_param {
 	char           *default_value;
 };
 
-#define DATA_SZ 1400
+#define DATA_SZ 1500
 /* Message data structure definitions */
 struct vpn_msg {
 	unsigned char	type;
@@ -926,7 +926,7 @@ void
 ext_sock_input(struct vpn_state *vpn)
 {
 	bool		ok;
-	unsigned char	ciphertext[crypto_box_MACBYTES + 128];
+	unsigned char	ciphertext[crypto_box_MACBYTES + sizeof(struct vpn_msg)];
 	struct vpn_msg	msg;
 	size_t		rx_len , ciphertext_len;
 	unsigned char	rx_nonce[crypto_box_NONCEBYTES];
