@@ -170,6 +170,7 @@ char           *time_str(time_t time, char *time_str, size_t len);
 char           *get_value(char *line, size_t len);
 bool		init      (bool fflag, char *config_fname, struct vpn_state *vpn);
 void		start_protocol(struct vpn_state *vpn);
+void		restart_protocol(struct vpn_state *vpn);
 void		change_state(struct vpn_state *vpn, vpn_state new_state);
 void		log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type);
 void		log_retransmit(struct vpn_state *vpn, message_type msg_type);
@@ -583,6 +584,14 @@ start_protocol(struct vpn_state *vpn)
 	randombytes_buf(vpn->nonce, sizeof(vpn->nonce));
 	bzero(vpn->remote_nonce, sizeof(vpn->remote_nonce));
 	tx_peer_id(vpn);
+}
+
+void restart_protocol(struct vpn_state *vpn)
+{
+	memcpy(vpn->cur_shared_key, vpn->orig_shared_key,
+	    sizeof(vpn->cur_shared_key));
+
+	start_protocol(vpn);
 }
 
 void
@@ -1001,6 +1010,17 @@ ext_sock_input(struct vpn_state *vpn)
 			log_msg(LOG_ERR, "%s: unknown message type %d",
 				VPN_STATE_STR(vpn->state), msg.type);
 		}
+	} else {
+		switch (vpn->state) {
+		case MASTER_KEY_STALE:
+		case SLAVE_KEY_SWITCHING:
+		case MASTER_KEY_READY:
+			restart_protocol(vpn);
+			break;
+		default:
+			/* fallthrough */
+			break;
+		}
 	}
 }
 
@@ -1092,9 +1112,7 @@ dead_peer_restart(struct vpn_state *vpn, struct timespec now)
 			 time_str(cur_sess_active_secs, cur_sess_active_str,
 				  sizeof(cur_sess_active_str)));
 		}
-		memcpy(vpn->cur_shared_key, vpn->orig_shared_key,
-		       sizeof(vpn->cur_shared_key));
-		start_protocol(vpn);
+		restart_protocol(vpn);
 	}
 
 	return vpn->peer_died;
