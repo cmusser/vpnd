@@ -3,51 +3,45 @@ tun-based VPN
 
 ## Overview
 
-vpnd creates an encrypted virtual connection between two hosts.  In
-its current form, it can be used for the simplest kind of virtual
-private network topology: two disparate networks connected by a pair
-of security gateways that communicate over an an insecure public
-network. The two gateways exchange encrypted layer 3 packets inside
-UDP datagrams. In its current form, vpnd is usable gateway software.
-It intends to be a testbed for other forms of VPN as well.
+`vpnd` provides an encrypted virtual connection between two hosts,
+allowing the creation of secure network topologies.
 
-Creating a VPN requires some manual network configuration. The remote
-network configuration must be known ahead of time and routes must be
-configured on the relevant hosts. Either the client machines or the
-network's default router must know the address of the local security
-gateway. 
-
-Currently, vpnd does NOT implement the VPN configuration commonly used
-in larger networks--an access concentrator to which individual clients
-make their own connections. This configuration may require a more involved 
-setup that passes layer 2 packets and uses the bridging functionality on
-the gateways to make it seem as if the clients are attached via an Ethernet
-switch. It has not been designed yet.
-
-vpnd is designed to be simple and, as a result, secure. It requires little
-configuration. It uses security primitives provided by the NaCl cryptography
-library and changes its encryption keys periodically to provide "perfect
-forward secrecy". It was inspired by other, similar projects, principally
-QuickTUN, whose author helpfully gave some advice on network configuration
-while this project was still in the planning stage.
+`vpnd` is designed to be simple and, as a result, secure. It requires
+little configuration. It was inspired by other, similar projects,
+principally QuickTUN, whose author helpfully gave some advice on
+network configuration while this project was still in the planning
+stage.
 
 ## Features
 
-- No reduced security modes: no options for unencrypted transport
-  or unchanging nonces. Ephemeral keys are always used.
+- Uses cryptographic primitives from the well-regarded NaCl library.
+
+- No reduced security modes: no options for unencrypted transport or
+  unchanging nonces.
+
+- To prevent decryption of recorded conversatons in the case of a
+  future private key compromise (a characteristic known as "perfect
+  forward secrecy"), `vpnd` uses frequently-changing encryption keys
+  while running.
 
 - BSD only at the moment. Linux could be supported by replacing the
   event handling code (based on `kqueue`) with `epoll` and the
   `timerfd_*` and `signalfd` family of functions.
 
-- Layer 3 only. It could open up a `tap(4)` interface instead of a
-  `tun(4)`, but more investigation into the specific network
-  configuration is required.
+- Layer 3 transport. Saves bandwidth and prevents broadcast traffic
+  from traversing the link.
 
-- Doesn't do any routing table configuration. An example script in
-  the project demonstrates what to to, however.
+- Supports two well-defined modes of operation:
 
-- Easy to configure on a pair of gateway hosts.
+	- An individual client host needing access to a remote network,
+	  and a security gateway providing access to one or more such
+	  clients. This allows individual clients to access a main
+	  network.
+
+	- A pair of hosts acting as security gateways that connect two
+	  private networks together via a secure link. This connects
+	  all the hosts in two sites together.
+
 
 ## Requirements
 
@@ -55,14 +49,52 @@ while this project was still in the planning stage.
 2. libsodium >= 1.0.7
 
 
-## Usage
+## Modes of Operation
 
-### Basic Configuration and Startup
+### Gateway Mode
+
+In this mode, a pair of hosts, each with an interface on an internal
+network and another on the Internet, provide a communcation path for
+hosts on the internal networks. This is akin to VPN software that
+connects geographically separated sites together. This is a useful
+setup, but less often seen outside of large companies.
+
+The configuration in this case is static because information about
+each network can be shared in advance and does not change often.
+Each gateway knows the address of its peer. The addresses of the
+other peer's insternal network is also known, and a route to it
+via the VPN gateway can be configured in the default gateway for each
+internal network. The VPN gateways, in effect become layer 3 routers,
+and use the operating system's packet forwarding to move data.
+
+### Client/Server Mode
+
+In this mode, a client host, often operating from behind a firewall,
+connects to a host that acts as a gateway to its internal
+network. This mode is used more widely: this is how mobile or remote
+users connect to corporate networks.
+
+Here, the network configuration is dynamic due to the nature of mobile
+hosts and NATs. The gateway needs the address of the client, something
+not known until the client actually begins communication. The client
+needs an address on the gateway's internal network. Finally, when the
+connection becomes active, the gateway host becomes an ARP proxy for
+the client for which it is providing access. This allows the client
+host (or any number of clients) to participate on the remote network
+without needing to configure routes on gateways on the remote
+network. Because layer 2 is terminated at the VPN host, the connection
+need only pass layer 3. This reduces bandwidth and prevents broadcast
+traffic from traversing the link. It also simplifies the codebase,
+because only one type of tunnel (the `tun(4)`) needs to be supported.
+
+
+## Configuration and Startup
 The configuration file (`vpnd.conf` in the current directory, by
 default) contains one parameter per line, in the following format:
 
 `param_name: value`
 
+### Key Generation
 1. Use the `keypair` program to create a public/private keypair and
    the resulting public key to the operator of the peer system
 2. Get the peer's public key.
@@ -70,57 +102,38 @@ default) contains one parameter per line, in the following format:
 		- `local_sk` the locally generate secret key.
 		- `remote_pk` the peer's public key
 		- `remote_host`: the name or IP address of the peer gateway.
-4. Start the server (`vpnd`). When getting a setup working
-   initially, foreground mode (`-f`) is helpful.
 
-### Complete List Of Parameters
+### Command Line Parameters
+|Option|Description|Notes|
+|---|---|---|
+|`-v`| verbosity level|Specify once for NOTICE level verbosity, multiple times for DEBUG|
+|`-f`| foreground mode|Run in foreground. The default is to run as a  daemon|
+|`-c`| configuration file|Name of configuration file. The default is `vpnd.conf` in the current working directory|
 
+### Configuration File Parameters
 |Parameter Name|Description|Required?|
 |---|---|---|
+|role|The networking role to assume: `net-gw`, `host-gw`, or `host`. These roles are explained above|no, defaults to `net-gw`|
 |device|The tunnel device path  |no, defaults to `/dev/tun0`.|
 |stats_prefix|prefix to use for Graphite data  |no, defaults to value from`gethostname(3)`.|
 |local_sk|The local secret key|yes, use values from `keypair` program.|
 |local_port|local UDP port to listen on|no, defaults to 1337.|
 |remote_pk|The peer's public key|yes, use values from `keypair` program|
-|remote_host|hostname or IP address of|yes|
+|remote_host|hostname or IP address of remote peer.|yes, in `host` and `net-gw` role.|
+|client_addr|In `host-gw` mode, the address to assign to the client and the prefix length of the associated network|yes, in `host-gw` role. This  Specified in CIDR notation, ie 192.168.1.1/24|
 |remote_port|UDP port on peer to listen on|no, defaults to 1337.|
 |max_key_age|Maximum age for ephemeral key, in seconds.|no, defaults to 60 seconds.|
 |max_key_packets|Maximum number of packets that can be sent with ephemeral key|no defaults to 100,000.|
 
-### Networking
+### Configuration Examples
 
-After the server processes are started, secure communication between
-them should work. If they were started in foreground mode, you can
-type lines of text into a console and they will appear in the console
-of the other side. This will work even if no networking setup (steps 1
-and 2 below) has been done.
+#### Gateway
 
-To enable communication between the two internal networks, interfaces
-and routes must be set up. The `test/test.sh` has examples of the
-commands to run, but the procedure is outlined below:
+TBD
 
-1. Make sure the local machine has an address on the network that you
-   want to make available to the remote side. The `test/test.sh`
-   script adds an extra address to an existing interface, but a host already
-   serving as a gateway will likely already have addresses on external
-   and internal interfaces.
+#### Client Server
 
-2. Add a route to the remote side's internal network via the
-   tunnel interface. The `test/test.sh` script has an example
-   of this as well.
-
-3. Repeat these steps for the remote side. To set up a simple test
-   on a pair of laptops using the test script, run the following pair
-   of commands, one on the client and the other on the server:
-
-        test/test.sh -iwlan0 -mclient
-        test/test.sh -iwlan0 -mserver
-
-   The `-iwlan0` can be omitted after the first run.
-
-4. Communication between the two private networks should now be
-   possible. Pings should work and the `netcat(1)` program started
-   by the test script can be used for verifying real two-way traffic.
+TBD
 
 ### Statistics and Diagnostics
 
@@ -128,7 +141,7 @@ The current state is sent to the current logging output if the process receives
 the `USR1` signal or if `stats` is typed into the console in foreground
 mode. Graphite plaintext formatted statistics are available by connecting to
 the `/var/run/vpnd_stats.sock` UNIX domain socket. An example of doing this
-is:
+on the command line is:
 
 `nc -U /var/run/vpnd_stats.sock`
 
