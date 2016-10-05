@@ -841,6 +841,10 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 			}
 		}
 		if (ok) {
+			generate_peer_id(vpn);
+			randombytes_buf(vpn->nonce, sizeof(vpn->nonce));
+			bzero(vpn->remote_nonce, sizeof(vpn->remote_nonce));
+
 			EV_SET(&vpn->kev_changes[0], vpn->ext_sock,
 			       EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
 			vpn->kev_change_count = 1;
@@ -888,6 +892,9 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 			config_fname, strerror(errno));
 	}
 
+	if (local_addrinfo != NULL)
+		freeaddrinfo(local_addrinfo);
+
 	if (remote_addrinfo != NULL)
 		freeaddrinfo(remote_addrinfo);
 
@@ -905,13 +912,11 @@ reinit_with_orig_shared_key(struct vpn_state *vpn)
 void
 change_state(struct vpn_state *vpn, vpn_state new_state)
 {
-	vpn_state	prev_state;
 	time_t		inactive_secs;
 	char		inactive_str[32];
 
 	log_msg(LOG_INFO, "%s --> %s", VPN_STATE_STR(vpn->state),
 		VPN_STATE_STR(new_state));
-	prev_state = vpn->state;
 	vpn->state = new_state;
 
 	switch (vpn->state) {
@@ -919,11 +924,6 @@ change_state(struct vpn_state *vpn, vpn_state new_state)
 		log_msg(LOG_NOTICE, "%s: waiting for host", VPN_ROLE_STR(vpn->role));
 		break;
 	case INIT:
-		if (prev_state == HOST_WAIT) {
-		}
-		generate_peer_id(vpn);
-		randombytes_buf(vpn->nonce, sizeof(vpn->nonce));
-		bzero(vpn->remote_nonce, sizeof(vpn->remote_nonce));
 		tx_peer_info(vpn);
 		break;
 	case MASTER_KEY_STALE:
