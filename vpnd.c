@@ -524,7 +524,7 @@ manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, 
 			remote_addr_s, sizeof(remote_addr_s));
 
 	if (connect(vpn->ext_sock, remote_addr, remote_addr_len) == 0) {
-		log_msg(LOG_NOTICE, "%s connected to remote: %s",
+		log_msg(LOG_NOTICE, "%s: connected to %s",
 			VPN_ROLE_STR(vpn->role), remote_addr_s);
 	} else {
 		ok = false;
@@ -978,8 +978,8 @@ change_state(struct vpn_state *vpn, vpn_state new_state)
 void
 log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type)
 {
-	log_msg(LOG_ERR, "%s: %s (%d) message invalid for state",
-		VPN_STATE_STR(vpn->state), MSG_TYPE_STR(msg_type), msg_type);
+	log_msg(LOG_ERR, "%s: received unexpected %s message",
+		VPN_STATE_STR(vpn->state), MSG_TYPE_STR(msg_type));
 }
 
 void
@@ -1033,8 +1033,9 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 
 		if ((tx_len = writev(vpn->ext_sock, tx_iovec, COUNT_OF(tx_iovec))) == -1) {
 			ok = false;
-			log_msg(LOG_ERR, "%sL write failed -- %s",
-				VPN_STATE_STR(vpn->state), strerror(errno));
+			log_msg(LOG_ERR, "%s: writev failed for %s message -- %s",
+			 VPN_STATE_STR(vpn->state), MSG_TYPE_STR(msg->type),
+				strerror(errno));
 		} else {
 			log_msg(LOG_DEBUG, "%zd bytes written", tx_len);
 			vpn->key_sent_packet_count++;
@@ -1326,7 +1327,7 @@ ext_sock_input(struct vpn_state *vpn)
 		log_msg(LOG_DEBUG, "%zd bytes read", rx_len);
 		if (sodium_compare(vpn->remote_nonce, rx_nonce, crypto_box_NONCEBYTES) > -1) {
 			ok = false;
-			log_msg(LOG_ERR, "%s: received nonce (%s)<= previous (%s)",
+			log_msg(LOG_ERR, "%s: received nonce (%s) <= previous (%s)",
 				VPN_STATE_STR(vpn->state),
 			  sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str),
 					 rx_nonce, sizeof(rx_nonce)),
