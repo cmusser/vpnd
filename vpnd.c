@@ -33,7 +33,7 @@
 
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
 #define PEER_MAX_HEARTBEAT_INTERVAL_SECS 20
-
+#define MAX_HOST_GW_INIT_SECS 120
 /* VPN process role */
 typedef enum {
 	NET_GW,
@@ -1254,6 +1254,8 @@ process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 	case MASTER_KEY_READY:
 		change_state(vpn, ACTIVE_MASTER);
 		/* fallthrough */
+	case MASTER_KEY_STALE:
+	case SLAVE_KEY_SWITCHING:
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
 		if (write(vpn->ctrl_sock, msg->data, data_len) < 0)
@@ -1487,7 +1489,8 @@ void
 process_timeout(struct vpn_state *vpn, struct kevent *kev)
 {
 	struct timespec	now;
-	time_t		age;
+	time_t		inactive_secs, cur_key_age;
+	char		inactive_secs_str[32];
 	struct sockaddr_in null_addr = {0};
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
@@ -1497,8 +1500,15 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 		if (vpn->state == INIT) {
 			switch (vpn->role) {
 			case HOST_GW:
-				if (now.tv_sec - vpn->sess_end_ts.tv_sec >= 60) {
-					manage_ext_sock_connection(vpn, (struct sockaddr *)&null_addr,
+				inactive_secs = now.tv_sec - vpn->sess_end_ts.tv_sec;
+				if (inactive_secs >= MAX_HOST_GW_INIT_SECS) {
+					log_msg(LOG_NOTICE, "%s: stayed in %s for %s",
+						VPN_ROLE_STR(vpn->role),
+						VPN_STATE_STR(vpn->state),
+						time_str(inactive_secs, inactive_secs_str,
+						sizeof(inactive_secs_str)));
+					manage_ext_sock_connection(vpn,
+					      (struct sockaddr *)&null_addr,
 							 sizeof(null_addr));
 					change_state(vpn, HOST_WAIT);
 				}
@@ -1540,8 +1550,8 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 			switch (vpn->state) {
 			case ACTIVE_MASTER:
 				tx_peer_info(vpn);
-				age = now.tv_sec - vpn->key_start_ts.tv_sec;
-				if ((age >= vpn->max_key_age_secs) ||
+				cur_key_age = now.tv_sec - vpn->key_start_ts.tv_sec;
+				if ((cur_key_age >= vpn->max_key_age_secs) ||
 				    (vpn->key_sent_packet_count
 				     >= vpn->max_key_sent_packet_count)) {
 					change_state(vpn, MASTER_KEY_STALE);
@@ -1627,7 +1637,7 @@ log_state(struct vpn_state *vpn)
 	}
 
 	log_msg(LOG_NOTICE, "%s is %s:\n"
-		"keys used: %" PRIu32 " sessions: %" PRIu32 "\n"
+		"sessions: %" PRIu32 ", keys used: %" PRIu32 " (max age %" PRIu32 " sec.)\n"
 		"time inactive/active: %s/%s\n"
 		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
 		"retransmits (pi/kss/ksa/kr): %" PRIu32
@@ -1635,7 +1645,7 @@ log_state(struct vpn_state *vpn)
 		"last peer message: %" PRIu32 " sec. ago%s",
 		VPN_ROLE_STR(vpn->role),
 		VPN_STATE_STR(vpn->state),
-		vpn->keys_used, vpn->sess_starts,
+		vpn->sess_starts, vpn->keys_used, vpn->max_key_age_secs,
 		time_str(cur_inactive_secs, cur_inactive_str,
 			 sizeof(cur_inactive_str)),
 		time_str(cur_sess_active_secs, cur_sess_active_str,
