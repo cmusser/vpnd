@@ -122,9 +122,10 @@ default) contains one parameter per line, in the following format:
 |remote_host|hostname or IP address of remote peer.|yes, in `host` and `net-gw` role.|
 |client_addr|In `host-gw` mode, the address to assign to the client and the prefix length of the associated network|yes, in `host-gw` role. This  Specified in CIDR notation, ie 192.168.1.1/24|
 |remote_port|UDP port on peer to listen on|no, defaults to 1337.|
-|max_key_age|Maximum age for ephemeral key, in seconds.|no, defaults to 60 seconds.|
-|max_key_packets|Maximum number of packets that can be sent with ephemeral key|no defaults to 100,000.|
-
+|max_key_age|Maximum age for ephemeral key, in seconds.|no, defaults to 60 seconds. Range is 30-3,600|
+|max_key_packets|Maximum number of packets that can be sent with ephemeral key|no, defaults to 100,000. Range is 5000-10,000,000|
+|nonce_file|Name of nonce reset point file|no, defaults to `vpnd.nonce`|
+|nonce_reset_incr|Interval for creating nonce reset point|no, defaults to 10000. Range is 16-20000|
 ### Configuration Examples
 
 #### Gateway

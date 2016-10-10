@@ -1,3 +1,4 @@
+#include <sys/endian.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -157,6 +158,7 @@ struct vpn_state {
 	vpn_role	role;
 	vpn_state	state;
 	char		tun_name  [8];
+	char		nonce_filename[256];
 	uint32_t	peer_id;
 	struct vpn_peer_info tx_peer_info;
 	struct vpn_peer_info rx_peer_info;
@@ -177,6 +179,9 @@ struct vpn_state {
 	unsigned char	new_shared_key[crypto_box_BEFORENMBYTES];
 	unsigned char	ready_retrans_key[crypto_box_BEFORENMBYTES];
 	unsigned char	nonce[crypto_box_NONCEBYTES];
+	uint32_t	nonce_reset_incr;
+	uint32_t	nonce_incr_count;
+	unsigned char	nonce_reset_incr_bin[crypto_box_NONCEBYTES];
 	unsigned char	remote_nonce[crypto_box_NONCEBYTES];
 	int		ext_sock;
 	int		ctrl_sock;
@@ -200,6 +205,8 @@ int		vflag = 0;
 void		log_msg   (int priority, const char *msg,...);
 char           *time_str(time_t time, char *time_str, size_t len);
 char           *get_value(char *line, size_t len);
+bool		read_nonce_reset_point(struct vpn_state *vpn, unsigned char *nonce);
+void		write_nonce_reset_point(struct vpn_state *vpn);
 char           *format_sockaddr(sa_family_t af, struct sockaddr *sa, char *str, size_t str_sz);
 bool		get_sockaddr(struct addrinfo **addrinfo_p, char *host, char *port_str, bool passive);
 void		addr2net_with_netmask(sa_family_t af, void *host_addr, unsigned char *netmask);
@@ -216,6 +223,7 @@ bool		init      (bool fflag, char *config_fname, struct vpn_state *vpn);
 void		reinit_with_orig_shared_key(struct vpn_state *vpn);
 void		change_state(struct vpn_state *vpn, vpn_state new_state);
 void		log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type);
+void		log_nonce (struct vpn_state *vpn, char *prefix, unsigned char *nonce);
 void		log_retransmit(struct vpn_state *vpn, message_type msg_type);
 void		add_timer (struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval);
 bool		tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len);
@@ -235,8 +243,8 @@ void		stats_sock_input(struct vpn_state *vpn);
 void		stdin_input(struct vpn_state *vpn);
 bool		dead_peer_restart(struct vpn_state *vpn, struct timespec now);
 void		process_timeout(struct vpn_state *vpn, struct kevent *kev);
-char           *string_for_peer_info(struct vpn_peer_info *peer_info, char *prefix_s, char *peer_info_s, size_t peer_info_s_sz);
-void		log_state (struct vpn_state *vpn);
+char           *string_for_peer_info(struct vpn_peer_info *peer_info, char *prefix_str, char *peer_info_str, size_t peer_info_str_sz);
+void		log_stats (struct vpn_state *vpn);
 bool		run       (struct vpn_state *vpn);
 
 void
@@ -246,7 +254,7 @@ log_msg(int priority, const char *msg,...)
 	time_t		now;
 	struct tm	now_tm;
 	char		timestamp_str[32];
-	char		msg_str   [256];
+	char		msg_str   [512];
 
 	va_start(ap, msg);
 	if (fflag) {
@@ -274,7 +282,6 @@ time_str(time_t time, char *time_str, size_t len)
 	h = m / 60;
 	m = m % 60;
 	snprintf(time_str, len, "%ld:%02ld:%02ld", h, m, s);
-
 
 	return time_str;
 }
@@ -304,6 +311,63 @@ get_value(char *line, size_t len)
 	}
 
 	return value;
+}
+
+bool
+read_nonce_reset_point(struct vpn_state *vpn, unsigned char *nonce)
+{
+	bool		ok = true;
+	FILE           *f;
+
+	f = fopen(vpn->nonce_filename, "r");
+	if (f == NULL) {
+		ok = false;
+		log_msg(LOG_ERR, "failed to open nonce file %s: %s\n",
+			vpn->nonce_filename, strerror(errno));
+	}
+	if (ok) {
+		if (fread(nonce, crypto_box_NONCEBYTES, 1, f) < 0) {
+			ok = false;
+			log_msg(LOG_ERR, "Can't read nonce from %s: %s\n",
+				vpn->nonce_filename, strerror(errno));
+		} else {
+			log_nonce(vpn, "read nonce reset point", nonce);
+		}
+	}
+	if (f != NULL)
+		fclose(f);
+
+	return ok;
+}
+
+void
+write_nonce_reset_point(struct vpn_state *vpn)
+{
+	bool		ok = true;
+	unsigned char	nonce_reset_point[crypto_box_NONCEBYTES];
+	FILE           *f;
+
+	vpn->nonce_incr_count = 0;
+
+	f = fopen(vpn->nonce_filename, "w");
+	if (f == NULL) {
+		ok = false;
+		log_msg(LOG_ERR, "failed to open nonce file %s: %s\n",
+			vpn->nonce_filename, strerror(errno));
+	}
+	if (ok) {
+		memcpy(nonce_reset_point, vpn->nonce, sizeof(nonce_reset_point));
+		sodium_add(nonce_reset_point, vpn->nonce_reset_incr_bin,
+			   sizeof(nonce_reset_point));
+		log_nonce(vpn, "create nonce reset point", nonce_reset_point);
+		if (fwrite(nonce_reset_point, sizeof(nonce_reset_point), 1, f) < 0) {
+			ok = false;
+			log_msg(LOG_ERR, "failed to write nonce to %s: %s\n",
+				vpn->nonce_filename, strerror(errno));
+		}
+	}
+	if (f != NULL)
+		fclose(f);
 }
 
 char           *
@@ -412,14 +476,23 @@ inet_pton_any(const char *restrict src, void *restrict dst)
 void
 spawn_subprocess(char *cmd)
 {
+	char		cmd_with_stderr_redirect[512];
 	FILE           *cmd_fd;
 	char		cmd_out   [256];
+	char           *newline;
 
-	if ((cmd_fd = popen(cmd, "r")) == NULL) {
-		log_msg(LOG_ERR, "spawn of \"%s\" failed: %s", cmd, strerror(errno));
+	snprintf(cmd_with_stderr_redirect, sizeof(cmd_with_stderr_redirect),
+		 "%s 2>&1", cmd);
+	if ((cmd_fd = popen(cmd_with_stderr_redirect, "r")) == NULL) {
+		log_msg(LOG_ERR, "spawn of \"%s\" failed: %s", cmd_with_stderr_redirect,
+			strerror(errno));
 	} else {
-		while (fgets(cmd_out, sizeof(cmd_out), cmd_fd) != NULL)
-			log_msg(LOG_NOTICE, "%", cmd_out);
+		while (fgets(cmd_out, sizeof(cmd_out), cmd_fd) != NULL) {
+			newline = strrchr(cmd_out, '\n');
+			if (newline)
+				*newline = '\0';
+			log_msg(LOG_NOTICE, "==> %s", cmd_out);
+		}
 
 		if (ferror(cmd_fd))
 			log_msg(LOG_ERR, "reading subprocess output: %s", strerror(errno));
@@ -431,18 +504,18 @@ spawn_subprocess(char *cmd)
 void
 add_proxy_arp_for_host(struct vpn_state *vpn)
 {
-	char		client_addr_s[INET6_ADDRSTRLEN];
+	char		client_addr_str[INET6_ADDRSTRLEN];
 	char		cmd       [256] = {'\0'};
 
 	if (inet_ntop(vpn->tx_peer_info.addr_family, &vpn->tx_peer_info.addr,
-		      client_addr_s, sizeof(client_addr_s)) == NULL) {
+		      client_addr_str, sizeof(client_addr_str)) == NULL) {
 		log_msg(LOG_ERR, "couldn't format address (AF %u) for adding "
 			" proxy ARP: %s", vpn->tx_peer_info.addr_family, strerror(errno));
 	} else {
 		if (vpn->tx_peer_info.addr_family == AF_INET)
-			snprintf(cmd, sizeof(cmd), "arp -s %s auto pub", client_addr_s);
+			snprintf(cmd, sizeof(cmd), "arp -s %s auto pub", client_addr_str);
 		else
-			snprintf(cmd, sizeof(cmd), "ndp -s %s proxy", client_addr_s);
+			snprintf(cmd, sizeof(cmd), "ndp -s %s proxy", client_addr_str);
 		log_msg(LOG_NOTICE, "%s add ARP/NDP: %s", VPN_ROLE_STR(vpn->role), cmd);
 		spawn_subprocess(cmd);
 	}
@@ -451,16 +524,16 @@ add_proxy_arp_for_host(struct vpn_state *vpn)
 void
 config_host_ptp_addrs(struct vpn_state *vpn)
 {
-	char		client_addr_s[INET6_ADDRSTRLEN];
+	char		client_addr_str[INET6_ADDRSTRLEN];
 	char		cmd       [256] = {'\0'};
 
 	if (inet_ntop(vpn->rx_peer_info.addr_family, &vpn->rx_peer_info.addr,
-		      client_addr_s, sizeof(client_addr_s)) == NULL) {
+		      client_addr_str, sizeof(client_addr_str)) == NULL) {
 		log_msg(LOG_ERR, "couldn't format address (AF %u) for ifconfig of "
 			"host tunnel: %s", vpn->rx_peer_info.addr_family, strerror(errno));
 	} else {
 		snprintf(cmd, sizeof(cmd), "ifconfig %s %s 10.0.0.1",
-			 vpn->tun_name, client_addr_s);
+			 vpn->tun_name, client_addr_str);
 		log_msg(LOG_NOTICE, "%s config p-t-p addrs: %s",
 			VPN_ROLE_STR(vpn->role), cmd);
 		spawn_subprocess(cmd);
@@ -470,17 +543,17 @@ config_host_ptp_addrs(struct vpn_state *vpn)
 void
 config_host_gw_ptp_addrs(struct vpn_state *vpn)
 {
-	char		client_addr_s[INET6_ADDRSTRLEN];
+	char		client_addr_str[INET6_ADDRSTRLEN];
 	char		cmd       [256] = {'\0'};
 
 	if (inet_ntop(vpn->tx_peer_info.addr_family, &vpn->tx_peer_info.addr,
-		      client_addr_s, sizeof(client_addr_s)) == NULL) {
+		      client_addr_str, sizeof(client_addr_str)) == NULL) {
 		log_msg(LOG_ERR, "couldn't format address (AF %u) for ifconfig "
 			"of host gw tunnel: %s",
 			vpn->tx_peer_info.addr_family, strerror(errno));
 	} else {
 		snprintf(cmd, sizeof(cmd), "ifconfig %s 10.0.0.1 %s",
-			 vpn->tun_name, client_addr_s);
+			 vpn->tun_name, client_addr_str);
 		log_msg(LOG_NOTICE, "%s config p-t-p addrs: %s",
 			VPN_ROLE_STR(vpn->role), cmd);
 		spawn_subprocess(cmd);
@@ -491,7 +564,7 @@ void
 add_route_to_host_gw_net(struct vpn_state *vpn)
 {
 	unsigned char	net_addr[sizeof(struct in6_addr)];
-	char		net_addr_s[INET6_ADDRSTRLEN];
+	char		net_addr_str[INET6_ADDRSTRLEN];
 	char		cmd       [256] = {'\0'};
 
 	memcpy(net_addr, &vpn->rx_peer_info.addr,
@@ -500,14 +573,14 @@ add_route_to_host_gw_net(struct vpn_state *vpn)
 	addr2net_with_prefix(vpn->rx_peer_info.addr_family, net_addr,
 			     vpn->rx_peer_info.prefix_len);
 
-	if (inet_ntop(vpn->rx_peer_info.addr_family, net_addr, net_addr_s,
-		      sizeof(net_addr_s)) == NULL) {
+	if (inet_ntop(vpn->rx_peer_info.addr_family, net_addr, net_addr_str,
+		      sizeof(net_addr_str)) == NULL) {
 		log_msg(LOG_ERR, "couldn't format address (AF %u) for adding route "
 			" to host gw net: %s",
 			vpn->rx_peer_info.addr_family, strerror(errno));
 	} else {
 		snprintf(cmd, sizeof(cmd), "route add %s/%u -interface %s",
-		   net_addr_s, vpn->rx_peer_info.prefix_len, vpn->tun_name);
+		 net_addr_str, vpn->rx_peer_info.prefix_len, vpn->tun_name);
 		log_msg(LOG_NOTICE, "%s add route to remote net: %s",
 			VPN_ROLE_STR(vpn->role), cmd);
 		spawn_subprocess(cmd);
@@ -518,18 +591,18 @@ bool
 manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, socklen_t remote_addr_len)
 {
 	bool		ok;
-	char		remote_addr_s[INET6_ADDRSTRLEN] = "<ADDR>";
+	char		remote_addr_str[INET6_ADDRSTRLEN] = "<ADDR>";
 
 	format_sockaddr(remote_addr->sa_family, remote_addr,
-			remote_addr_s, sizeof(remote_addr_s));
+			remote_addr_str, sizeof(remote_addr_str));
 
 	if (connect(vpn->ext_sock, remote_addr, remote_addr_len) == 0) {
 		log_msg(LOG_NOTICE, "%s: connected to %s",
-			VPN_ROLE_STR(vpn->role), remote_addr_s);
+			VPN_ROLE_STR(vpn->role), remote_addr_str);
 	} else {
 		ok = false;
 		log_msg(LOG_ERR, "couldn't connect to %s: %s",
-			remote_addr_s, strerror(errno));
+			remote_addr_str, strerror(errno));
 	}
 
 	return ok;
@@ -550,6 +623,7 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 	char		line      [256] = {'\0'};
 	char		role      [32] = {'\0'};
 	char		tunnel_device[32] = {'\0'};
+	uint32_t	nonce_reset_incr_le;
 	char		local_sk_hex[(crypto_box_SECRETKEYBYTES * 2) + 1] = {'\0'};
 	char		local_port[6] = {'\0'};
 	char		remote_pk_hex[(crypto_box_PUBLICKEYBYTES * 2) + 1] = {'\0'};
@@ -558,6 +632,7 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 	char		client_addr[INET6_ADDRSTRLEN] = {'\0'};
 	char		max_key_age_secs[16] = {'\0'};
 	char		max_key_sent_packet_count[16] = {'\0'};
+	char		nonce_reset_incr[16] = {'\0'};
 	const char     *num_err;
 	struct config_param c[] = {
 		{"role", "role:", sizeof("role:"),
@@ -582,6 +657,10 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 		max_key_age_secs, sizeof(max_key_age_secs), "60"},
 		{"max key packets", "max_key_packets:", sizeof("max_key_packets:"),
 		max_key_sent_packet_count, sizeof(max_key_sent_packet_count), "100000"},
+		{"nonce reset increment", "nonce_reset_incr:", sizeof("nonce_reset_incr:"),
+		nonce_reset_incr, sizeof(nonce_reset_incr), "10000"},
+		{"nonce file", "nonce_file:", sizeof("nonce_file:"),
+		vpn->nonce_filename, sizeof(vpn->nonce_filename), "vpnd.nonce"},
 	};
 
 	size_t		bin_len;
@@ -598,11 +677,9 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 	struct sockaddr_un stats_addr;
 	char           *stats_path = "/var/run/vpnd_stats.sock";
 
-	bzero(&vpn->tx_peer_info, sizeof(vpn->tx_peer_info));
-	bzero(&vpn->rx_peer_info, sizeof(vpn->rx_peer_info));
+	bzero(vpn, sizeof(struct vpn_state));
 
 	config_file = fopen(config_fname, "r");
-
 	if (config_file != NULL) {
 
 		/* Read config file */
@@ -631,7 +708,7 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 		 * config parameters
 		 */
 		for (i = 0; i < COUNT_OF(c); i++) {
-
+			log_msg(LOG_DEBUG, "%s: %s", c[i].name, c[i].value);
 			if (strlen(c[i].value) == 0) {
 				if (c[i].default_value == NULL) {
 					if (!(strcmp(c[i].name, "remote_host:") == 0 ||
@@ -647,6 +724,8 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 								c[i].value[j] = '_';
 						}
 					} else {
+						log_msg(LOG_DEBUG, "setting %s to %s",
+							c[i].name, c[i].default_value);
 						strlcpy(c[i].value, c[i].default_value,
 							c[i].value_sz);
 					}
@@ -733,6 +812,20 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 			}
 		}
 		if (ok) {
+			vpn->nonce_incr_count = 0;
+			vpn->nonce_reset_incr = strtonum(
+				     nonce_reset_incr, 16, 20000, &num_err);
+			if (num_err) {
+				ok = false;
+				log_msg(LOG_ERR, "invalid nonce reset increment: %s",
+					num_err);
+			} else {
+				nonce_reset_incr_le = htole32(vpn->nonce_reset_incr);
+				memcpy(vpn->nonce_reset_incr_bin, &nonce_reset_incr_le,
+				       sizeof(nonce_reset_incr_le));
+			}
+		}
+		if (ok) {
 			if (sodium_init() == -1) {
 				ok = false;
 				log_msg(LOG_ERR, "Failed to initialize crypto library");
@@ -741,7 +834,7 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 		/* Setup initial crypto box */
 		if (ok) {
 			if (sodium_hex2bin(local_sk_bin, sizeof(local_sk_bin),
-				    local_sk_hex, sizeof(local_sk_hex), ":",
+				    local_sk_hex, strlen(local_sk_hex), ":",
 					   &bin_len, NULL) != 0) {
 				ok = false;
 				log_msg(LOG_ERR, "invalid local secret key");
@@ -749,7 +842,7 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 		}
 		if (ok) {
 			if (sodium_hex2bin(remote_pk_bin, sizeof(remote_pk_bin),
-				  remote_pk_hex, sizeof(remote_pk_hex), ":",
+				  remote_pk_hex, strlen(remote_pk_hex), ":",
 					   &bin_len, NULL) != 0) {
 				ok = false;
 				log_msg(LOG_ERR, "invalid remote public key");
@@ -842,7 +935,11 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 		}
 		if (ok) {
 			generate_peer_id(vpn);
-			randombytes_buf(vpn->nonce, sizeof(vpn->nonce));
+			if (!read_nonce_reset_point(vpn, vpn->nonce)) {
+				randombytes_buf(vpn->nonce, sizeof(vpn->nonce));
+				log_nonce(vpn, "generating initial nonce", vpn->nonce);
+			}
+			write_nonce_reset_point(vpn);
 			bzero(vpn->remote_nonce, sizeof(vpn->remote_nonce));
 
 			EV_SET(&vpn->kev_changes[0], vpn->ext_sock,
@@ -983,6 +1080,15 @@ log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type)
 }
 
 void
+log_nonce(struct vpn_state *vpn, char *prefix, unsigned char *nonce)
+{
+	char		nonce_str [(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
+
+	log_msg(LOG_NOTICE, "%s: %s %s)", VPN_ROLE_STR(vpn->role), prefix,
+		sodium_bin2hex(nonce_str, sizeof(nonce_str), nonce, crypto_box_NONCEBYTES));
+}
+
+void
 log_retransmit(struct vpn_state *vpn, message_type msg_type)
 {
 	log_msg(LOG_NOTICE, "%s: retransmitting %s", VPN_STATE_STR(vpn->state),
@@ -1037,12 +1143,17 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 			 VPN_STATE_STR(vpn->state), MSG_TYPE_STR(msg->type),
 				strerror(errno));
 		} else {
-			log_msg(LOG_DEBUG, "%zd bytes written", tx_len);
+			log_msg(LOG_DEBUG, "sent %zd byte %s message", tx_len,
+				MSG_TYPE_STR(msg->type));
 			vpn->key_sent_packet_count++;
 		}
 
 	}
 	sodium_increment(vpn->nonce, sizeof(vpn->nonce));
+	vpn->nonce_incr_count++;
+
+	if (vpn->nonce_incr_count == vpn->nonce_reset_incr)
+		write_nonce_reset_point(vpn);
 
 	return ok;
 }
@@ -1156,13 +1267,13 @@ process_peer_info(struct vpn_state *vpn, struct vpn_msg *msg, struct sockaddr *p
 	case INIT:
 		hostorder_remote_peer_id = ntohl(vpn->rx_peer_info.peer_id);
 		if (hostorder_remote_peer_id > vpn->peer_id) {
-			log_msg(LOG_INFO, "will be key master");
+			log_msg(LOG_DEBUG, "will be key master");
 			change_state(vpn, MASTER_KEY_STALE);
 		} else if (hostorder_remote_peer_id < vpn->peer_id) {
 			/* Stay in INIT state */
-			log_msg(LOG_INFO, "will be key slave");
+			log_msg(LOG_DEBUG, "will be key slave");
 		} else {
-			log_msg(LOG_INFO, "got same peer ID from remote, trying again.");
+			log_msg(LOG_NOTICE, "got same peer ID from remote, trying again.");
 			generate_peer_id(vpn);
 			tx_peer_info(vpn);
 		}
@@ -1351,7 +1462,7 @@ ext_sock_input(struct vpn_state *vpn)
 	if (ok) {
 		data_len = ciphertext_len - crypto_box_MACBYTES - sizeof(msg.type);
 
-		log_msg(LOG_INFO, "%s: received %s", VPN_STATE_STR(vpn->state),
+		log_msg(LOG_DEBUG, "%s: received %s", VPN_STATE_STR(vpn->state),
 			MSG_TYPE_STR(msg.type));
 
 		switch (msg.type) {
@@ -1446,7 +1557,7 @@ stdin_input(struct vpn_state *vpn)
 	if (strcmp(tx_data, "\n") == 0) {
 		//Do nothing.No sense in sending a blank line.
 	} else if (strcmp(tx_data, "stats\n") == 0) {
-		log_state(vpn);
+		log_stats(vpn);
 	} else {
 		last_char = &tx_data[strlen(tx_data) - 1];
 		if (*last_char == '\n')
@@ -1490,10 +1601,13 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 {
 	struct timespec	now;
 	time_t		inactive_secs, cur_key_age;
+	bool		peer_init_retransmit;
 	char		inactive_secs_str[32];
 	struct sockaddr_in null_addr = {0};
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	log_msg(LOG_DEBUG, "timeout: %s", TIMER_TYPE_STR(kev->ident));
 
 	switch (kev->ident) {
 	case RETRANSMIT_PEER_INIT:
@@ -1502,6 +1616,7 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 			case HOST_GW:
 				inactive_secs = now.tv_sec - vpn->sess_end_ts.tv_sec;
 				if (inactive_secs >= MAX_HOST_GW_INIT_SECS) {
+					peer_init_retransmit = false;
 					log_msg(LOG_NOTICE, "%s: stayed in %s for %s",
 						VPN_ROLE_STR(vpn->role),
 						VPN_STATE_STR(vpn->state),
@@ -1511,17 +1626,19 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 					      (struct sockaddr *)&null_addr,
 							 sizeof(null_addr));
 					change_state(vpn, HOST_WAIT);
+				} else {
+					peer_init_retransmit = true;
 				}
 				break;
-			case HOST:
-			case NET_GW:
-				vpn->peer_init_retransmits++;
-				log_retransmit(vpn, PEER_INFO);
-				tx_peer_info(vpn);
-				break;
 			default:
+				peer_init_retransmit = true;
 				break;
 			}
+		}
+		if (peer_init_retransmit) {
+			vpn->peer_init_retransmits++;
+			log_retransmit(vpn, PEER_INFO);
+			tx_peer_info(vpn);
 		}
 		break;
 	case RETRANSMIT_KEY_SWITCH_START:
@@ -1573,58 +1690,64 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 }
 
 char           *
-string_for_peer_info(struct vpn_peer_info *peer_info, char *prefix_s, char *peer_info_s, size_t peer_info_s_sz)
+string_for_peer_info(struct vpn_peer_info *peer_info, char *prefix_str, char *peer_info_str, size_t peer_info_str_sz)
 {
 	bool		ok = true;
-	char		peer_addr_s[INET6_ADDRSTRLEN];
-	char           *addr_family_s;
+	char		peer_addr_str[INET6_ADDRSTRLEN];
+	char           *addr_family_str;
 
 	switch (peer_info->addr_family) {
 	case AF_INET:
-		addr_family_s = "IPv4";
+		addr_family_str = "IPv4";
 		break;
 	case AF_INET6:
-		addr_family_s = "IPv6";
+		addr_family_str = "IPv6";
 		break;
 	default:
 		ok = false;
-		addr_family_s = "UNKNOWN";
+		addr_family_str = "UNKNOWN";
 	}
 
 	if (ok) {
-		inet_ntop(peer_info->addr_family, &peer_info->addr, peer_addr_s,
+		inet_ntop(peer_info->addr_family, &peer_info->addr, peer_addr_str,
 			  INET6_ADDRSTRLEN);
-		snprintf(peer_info_s, peer_info_s_sz,
-		       "%s: %s %s/%u", prefix_s, addr_family_s, peer_addr_s,
+		snprintf(peer_info_str, peer_info_str_sz,
+		 "%s: %s %s/%u", prefix_str, addr_family_str, peer_addr_str,
 			 peer_info->prefix_len);
 	} else {
-		snprintf(peer_info_s, peer_info_s_sz, "%s: unknown address type (%u)",
-			 prefix_s, peer_info->addr_family);
+		snprintf(peer_info_str, peer_info_str_sz, "%s: unknown address type (%u)",
+			 prefix_str, peer_info->addr_family);
 	}
 
-	return peer_info_s;
+	return peer_info_str;
 }
 
 void
-log_state(struct vpn_state *vpn)
+log_stats(struct vpn_state *vpn)
 {
 	struct timespec	now;
 	time_t		cur_inactive_secs, cur_sess_active_secs;
 	char		cur_inactive_str[32], cur_sess_active_str[32];
-	char		peer_info_s[256] = {'\0'};
+	unsigned char	rp_nonce[crypto_box_NONCEBYTES];
+	char		tx_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
+	char		rp_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
+	char		rx_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
+	char		peer_info_str[256] = {'\0'};
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	cur_inactive_secs = vpn->inactive_secs;
 	cur_sess_active_secs = vpn->sess_active_secs;
 
+	read_nonce_reset_point(vpn, rp_nonce);
+
 	switch (vpn->role) {
 	case HOST:
-		string_for_peer_info(&vpn->rx_peer_info, "\nRX peerinfo", peer_info_s,
-				     sizeof(peer_info_s));
+		string_for_peer_info(&vpn->rx_peer_info, "\nRX peerinfo", peer_info_str,
+				     sizeof(peer_info_str));
 		break;
 	case HOST_GW:
-		string_for_peer_info(&vpn->tx_peer_info, "\nTX peerinfo", peer_info_s,
-				     sizeof(peer_info_s));
+		string_for_peer_info(&vpn->tx_peer_info, "\nTX peerinfo", peer_info_str,
+				     sizeof(peer_info_str));
 		break;
 	default:
 		break;
@@ -1642,7 +1765,11 @@ log_state(struct vpn_state *vpn)
 		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
 		"retransmits (pi/kss/ksa/kr): %" PRIu32
 		"/%" PRIu32 "/%" PRIu32 "/%" PRIu32 "\n"
-		"last peer message: %" PRIu32 " sec. ago%s",
+		"last peer message: %" PRIu32 " sec. ago\n"
+		"nonces since reset: %" PRIu32 "\n"
+		"TX nonce: %s\n"
+		"RP nonce: %s\n"
+		"RX nonce: %s%s",
 		VPN_ROLE_STR(vpn->role),
 		VPN_STATE_STR(vpn->state),
 		vpn->sess_starts, vpn->keys_used, vpn->max_key_age_secs,
@@ -1655,7 +1782,14 @@ log_state(struct vpn_state *vpn)
 	 vpn->key_switch_start_retransmits, vpn->key_switch_ack_retransmits,
 		vpn->key_ready_retransmits,
 		(now.tv_sec - vpn->peer_last_heartbeat_ts.tv_sec),
-		peer_info_s);
+		vpn->nonce_incr_count,
+	      sodium_bin2hex(tx_nonce_str, sizeof(tx_nonce_str), vpn->nonce,
+			     crypto_box_NONCEBYTES),
+		sodium_bin2hex(rp_nonce_str, sizeof(rp_nonce_str), rp_nonce,
+			       crypto_box_NONCEBYTES),
+	sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str), vpn->remote_nonce,
+		       crypto_box_NONCEBYTES),
+		peer_info_str);
 }
 
 bool
@@ -1698,7 +1832,7 @@ run(struct vpn_state *vpn)
 					process_timeout(vpn, &event);
 					break;
 				case EVFILT_SIGNAL:
-					log_state(vpn);
+					log_stats(vpn);
 					break;
 				default:
 					log_msg(LOG_WARNING, "unhandled event type: %d",
