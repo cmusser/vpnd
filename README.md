@@ -19,10 +19,9 @@ stage.
 - No reduced security modes: no options for unencrypted transport or
   unchanging nonces.
 
-- To prevent decryption of recorded conversatons in the case of a
-  future private key compromise (a characteristic known as "perfect
-  forward secrecy"), `vpnd` uses frequently-changing encryption keys
-  while running.
+- Frequently-changing encryption keys increase the difficulty of
+  decrypting recorded flows in the future, even if the initial private
+  keys are compromised. This is known as "forward secrecy".
 
 - BSD only at the moment. Linux could be supported by replacing the
   event handling code (based on `kqueue`) with `epoll` and the
@@ -31,7 +30,7 @@ stage.
 - Layer 3 transport. Saves bandwidth and prevents broadcast traffic
   from traversing the link.
 
-- Supports two well-defined modes of operation:
+- Supports two well-defined VPN use cases:
 
 	- An individual client host needing access to a remote network,
 	  and a security gateway providing access to one or more such
@@ -53,16 +52,16 @@ stage.
 
 ### Gateway Mode
 
-In this mode, a pair of hosts, each with an interface on an internal
-network and another on the Internet, provide a communcation path for
-hosts on the internal networks. This is akin to VPN software that
-connects geographically separated sites together. This is a useful
+In this mode, a pair of hosts--each with an interface on an internal
+network and another on the Internet--provide a communcation path for
+other hosts on the internal networks. This is akin to VPN software
+that connects geographically separated sites together. This is a useful
 setup, but less often seen outside of large companies.
 
 The configuration in this case is static because information about
 each network can be shared in advance and does not change often.
 Each gateway knows the address of its peer. The addresses of the
-other peer's insternal network is also known, and a route to it
+other peer's internal network is also known, and a route to it
 via the VPN gateway can be configured in the default gateway for each
 internal network. The VPN gateways, in effect become layer 3 routers,
 and use the operating system's packet forwarding to move data.
@@ -75,18 +74,21 @@ network. This mode is used more widely: this is how mobile or remote
 users connect to corporate networks.
 
 Here, the network configuration is dynamic due to the nature of mobile
-hosts and NATs. The gateway needs the address of the client, something
-not known until the client actually begins communication. The client
-needs an address on the gateway's internal network. Finally, when the
-connection becomes active, the gateway host becomes an ARP proxy for
-the client for which it is providing access. This allows the client
-host (or any number of clients) to participate on the remote network
-without needing to configure routes on gateways on the remote
-network. Because layer 2 is terminated at the VPN host, the connection
-need only pass layer 3. This reduces bandwidth and prevents broadcast
-traffic from traversing the link. It also simplifies the codebase,
-because only one type of tunnel (the `tun(4)`) needs to be supported.
-
+hosts and NATs. `vpnd` performs the various network stack configuration
+changes, making connections easy to establish. The gateway discovers
+the address of the client by passively listening until the client
+actually begins communication. When the connection becomes active, the
+gateway host providess the client with an address on its local network
+and becomes an ARP proxy for that address. This arrangement allows
+any number of clients to participate on the remote network, each served
+by a dedicated `vpnd` process. The ARP proxy technique offers a couple
+of advantages. It eliminates the need to configure routes on any other
+routers on the host network: remote clients simply appear to be hosts 
+attached to the LAN. Because layer 2 is terminated at the VPN host,
+the connection need only pass layer 3. This reduces bandwidth and
+prevents broadcast traffic from traversing the link. It also simplifies
+the codebase, because only one type of tunnel (the `tun(4)`) needs to 
+be supported.
 
 ## Configuration and Startup
 The configuration file (`vpnd.conf` in the current directory, by
@@ -128,13 +130,65 @@ default) contains one parameter per line, in the following format:
 |nonce_reset_incr|Interval for creating nonce reset point|no, defaults to 10000. Range is 16-20000|
 ### Configuration Examples
 
-#### Gateway
+#### Network Gateways
 
-TBD
+In this example, private network #1 is 172.16.0.0/16 and the VPN gateway's
+address on this network is 172.16.0.2. Private network #2 is 10.1.0.0/16
+and the VPN gateway's address on this network is 10.1.0.2. We assume that
+both networks have another host that acts as the default router.
 
-#### Client Server
+##### Gateway #1 config:
 
-TBD
+```
+local_sk: <clocal secret key>
+remote_pk: <gateway #2 public key>
+role: gateway
+remote_host: vpn-gw.network-2.com
+```
+Private network #1's default router needs to be configured with a route
+to private network #2, via its local VPN gateway:
+
+`route add 10.1.0.0/16 172.16.0.2`
+
+##### Gateway #2 config:
+
+```
+local_sk: <local secret key>
+remote_pk: <gateway #1 public key>
+role: gateway
+remote_host: vpn--gw.network-1.com
+```
+Similar to the above, private network #2's default router needs to
+be configured with a route to private network #1, via its local VPN
+gateway:
+
+`route add 172.16.0.0/16 10.1.0.2`
+
+#### Host/Host Gateway
+
+In this example the host gateway's network is 192.168.1.0/24. The client host
+can be anywhere. On the host gateway, the `vpnd` can be simply started beforehand
+in the background.
+
+##### Host Gateway config:
+
+```
+local_sk: <host gateway secret key>
+remote_pk: <client host public key>
+role: host-gw
+client_addr: 192.168.1.66/24
+```
+
+##### Host configuration
+
+```
+local_sk: <client host secret key>
+remote_pk: <host gateway public key>
+role: host
+remote_host: vpn-host-gw.some-domain.com
+```
+No route establishment, interface configuration or ARP table commands need 
+to be manually issued. `vpnd` will perform the necessary configuration.
 
 ### Statistics and Diagnostics
 
