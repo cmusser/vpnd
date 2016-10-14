@@ -142,7 +142,7 @@ both networks have another host that acts as the default router.
 ```
 local_sk: <clocal secret key>
 remote_pk: <gateway #2 public key>
-role: gateway
+role: net-gw
 remote_host: vpn-gw.network-2.com
 ```
 Private network #1's default router needs to be configured with a route
@@ -155,7 +155,7 @@ to private network #2, via its local VPN gateway:
 ```
 local_sk: <local secret key>
 remote_pk: <gateway #1 public key>
-role: gateway
+role: net-gw
 remote_host: vpn--gw.network-1.com
 ```
 Similar to the above, private network #2's default router needs to
