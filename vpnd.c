@@ -35,6 +35,12 @@
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
 #define PEER_MAX_HEARTBEAT_INTERVAL_SECS 20
 #define MAX_HOST_GW_INIT_SECS 120
+#define PEER_INIT_RETRANS_INTERVAL (5 * 1000)
+#define HEARTBEAT_INTERVAL (10 * 1000)
+#define KEY_SWITCH_RETRANS_INTERVAL (500)
+#define KEY_READY_RETRANS_INTERVAL (500)
+
+
 /* VPN process role */
 typedef enum {
 	NET_GW,
@@ -196,6 +202,7 @@ struct vpn_state {
 	uint32_t	key_ready_retransmits;
 	uint32_t	keys_used;
 	uint32_t	sess_starts;
+	uint32_t	decrypt_failures;
 	bool		peer_died;
 };
 
@@ -241,7 +248,7 @@ void		ext_sock_input(struct vpn_state *vpn);
 void		ctrl_sock_input(struct vpn_state *vpn);
 void		stats_sock_input(struct vpn_state *vpn);
 void		stdin_input(struct vpn_state *vpn);
-bool		dead_peer_restart(struct vpn_state *vpn, struct timespec now);
+bool		check_peer_alive(struct vpn_state *vpn, struct timespec now);
 void		process_timeout(struct vpn_state *vpn, struct kevent *kev);
 char           *string_for_peer_info(struct vpn_peer_info *peer_info, char *prefix_str, char *peer_info_str, size_t peer_info_str_sz);
 void		log_stats (struct vpn_state *vpn);
@@ -966,7 +973,8 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 				vpn->key_switch_ack_retransmits =
 				vpn->key_ready_retransmits =
 				vpn->keys_used = vpn->sess_starts =
-				vpn->sess_active_secs = vpn->inactive_secs = 0;
+				vpn->sess_active_secs = vpn->inactive_secs =
+				vpn->decrypt_failures = 0;
 
 			vpn->peer_died = false;
 			clock_gettime(CLOCK_MONOTONIC, &vpn->sess_end_ts);
@@ -1139,12 +1147,10 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 
 		if ((tx_len = writev(vpn->ext_sock, tx_iovec, COUNT_OF(tx_iovec))) == -1) {
 			ok = false;
-			log_msg(LOG_ERR, "%s: writev failed for %s message -- %s",
+			log_msg(LOG_ERR, "%s: writev failed for %s message -- %s (%d)",
 			 VPN_STATE_STR(vpn->state), MSG_TYPE_STR(msg->type),
-				strerror(errno));
+				strerror(errno), errno);
 		} else {
-			log_msg(LOG_DEBUG, "sent %zd byte %s message", tx_len,
-				MSG_TYPE_STR(msg->type));
 			vpn->key_sent_packet_count++;
 		}
 
@@ -1167,24 +1173,26 @@ tx_peer_info(struct vpn_state *vpn)
 	intptr_t	timeout_interval;
 
 	ok = true;
+	msg.type = PEER_INFO;
+
 	switch (vpn->state) {
 	case INIT:
 		ttype = RETRANSMIT_PEER_INIT;
-		timeout_interval = 5000;
+		timeout_interval = PEER_INIT_RETRANS_INTERVAL;
 		break;
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
 		ttype = ACTIVE_HEARTBEAT;
-		timeout_interval = 10000;
+		timeout_interval = HEARTBEAT_INTERVAL;
 		break;
 	default:
 		ok = false;
-		log_msg(LOG_ERR, "%s: may not transmit peer ID in state",
+		log_msg(LOG_ERR, "%s: may not transmit %s in %s state",
+			VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(msg.type),
 			VPN_STATE_STR(vpn->state));
 	}
 
 	if (ok) {
-		msg.type = PEER_INFO;
 		memcpy(&msg.data, &vpn->tx_peer_info,
 		       sizeof(vpn->tx_peer_info));
 		if (tx_encrypted(vpn, &msg, sizeof(vpn->tx_peer_info)))
@@ -1213,15 +1221,16 @@ tx_new_public_key(struct vpn_state *vpn)
 		break;
 	default:
 		ok = false;
-		log_msg(LOG_ERR, "%s: may not transmit public key in state",
-			VPN_STATE_STR(vpn->state));
+		log_msg(LOG_ERR, "%s: may not transmit %s or %s in %s state",
+		    VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(KEY_SWITCH_START),
+		   MSG_TYPE_STR(KEY_SWITCH_ACK), VPN_STATE_STR(vpn->state));
 	}
 
 	if (ok) {
 		msg.type = type;
 		memcpy(msg.data, vpn->new_public_key, sizeof(vpn->new_public_key));
 		if (tx_encrypted(vpn, &msg, sizeof(vpn->new_public_key)))
-			add_timer(vpn, ttype, 5000);
+			add_timer(vpn, ttype, KEY_SWITCH_RETRANS_INTERVAL);
 	}
 }
 
@@ -1233,22 +1242,24 @@ tx_key_ready(struct vpn_state *vpn)
 	message_type	type;
 
 	ok = true;
+	msg.type = KEY_READY;
+
 	switch (vpn->state) {
 	case MASTER_KEY_STALE:
-		type = KEY_READY;
+	case MASTER_KEY_READY:
 		break;
 	default:
 		ok = false;
-		log_msg(LOG_ERR, "%s: may not transmit KEY_READY in state",
+		log_msg(LOG_ERR, "%s: may not transmit %s in %s state",
+			VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(type),
 			VPN_STATE_STR(vpn->state));
 	}
 
 	if (ok) {
-		msg.type = type;
 		memcpy(&msg.data, &vpn->tx_peer_info,
 		       sizeof(vpn->tx_peer_info));
 		if (tx_encrypted(vpn, &msg, sizeof(vpn->tx_peer_info)))
-			add_timer(vpn, ACTIVE_HEARTBEAT, 10000);
+			add_timer(vpn, RETRANSMIT_KEY_READY, KEY_READY_RETRANS_INTERVAL);
 	}
 }
 
@@ -1433,11 +1444,10 @@ ext_sock_input(struct vpn_state *vpn)
 	if ((rx_len = recvmsg(vpn->ext_sock, &msghdr, 0)) == -1) {
 		ok = false;
 		if (errno != ECONNREFUSED)
-			log_msg(LOG_ERR, "%s: error reading from tunnel socket: %s",
-				VPN_STATE_STR(vpn->state), strerror(errno));
+			log_msg(LOG_ERR, "%s: recvmsg failed from tunnel socket -- %s (%d)",
+			 VPN_STATE_STR(vpn->state), strerror(errno), errno);
 	}
 	if (ok) {
-		log_msg(LOG_DEBUG, "%zd bytes read", rx_len);
 		if (sodium_compare(vpn->remote_nonce, rx_nonce, crypto_box_NONCEBYTES) > -1) {
 			ok = false;
 			log_msg(LOG_ERR, "%s: received nonce (%s) <= previous (%s)",
@@ -1453,8 +1463,7 @@ ext_sock_input(struct vpn_state *vpn)
 		if (crypto_box_open_easy_afternm((unsigned char *)&msg, ciphertext,
 		      ciphertext_len, rx_nonce, vpn->cur_shared_key) != 0) {
 			ok = false;
-			log_msg(LOG_ERR, "%s: decryption failed of %zu bytes",
-				VPN_STATE_STR(vpn->state), ciphertext_len);
+			vpn->decrypt_failures++;
 		} else {
 			memcpy(vpn->remote_nonce, rx_nonce, sizeof(vpn->remote_nonce));
 		}
@@ -1462,8 +1471,9 @@ ext_sock_input(struct vpn_state *vpn)
 	if (ok) {
 		data_len = ciphertext_len - crypto_box_MACBYTES - sizeof(msg.type);
 
-		log_msg(LOG_DEBUG, "%s: received %s", VPN_STATE_STR(vpn->state),
-			MSG_TYPE_STR(msg.type));
+		if (msg.type != DATA)
+			log_msg(LOG_DEBUG, "%s: received %s", VPN_STATE_STR(vpn->state),
+				MSG_TYPE_STR(msg.type));
 
 		switch (msg.type) {
 		case PEER_INFO:
@@ -1487,17 +1497,6 @@ ext_sock_input(struct vpn_state *vpn)
 		default:
 			log_msg(LOG_ERR, "%s: unknown message type %d",
 				VPN_STATE_STR(vpn->state), msg.type);
-		}
-	} else {
-		switch (vpn->state) {
-		case MASTER_KEY_STALE:
-		case SLAVE_KEY_SWITCHING:
-		case MASTER_KEY_READY:
-			reinit_with_orig_shared_key(vpn);
-			break;
-		default:
-			/* fallthrough */
-			break;
 		}
 	}
 }
@@ -1555,7 +1554,7 @@ stdin_input(struct vpn_state *vpn)
 	fgets(tx_data, sizeof(msg.data) - 1, stdin);
 
 	if (strcmp(tx_data, "\n") == 0) {
-		//Do nothing.No sense in sending a blank line.
+		/* Do nothing. No sense in sending a blank line. */
 	} else if (strcmp(tx_data, "stats\n") == 0) {
 		log_stats(vpn);
 	} else {
@@ -1570,7 +1569,7 @@ stdin_input(struct vpn_state *vpn)
 }
 
 bool
-dead_peer_restart(struct vpn_state *vpn, struct timespec now)
+check_peer_alive(struct vpn_state *vpn, struct timespec now)
 {
 	time_t		cur_sess_active_secs;
 	char		cur_sess_active_str[32];
@@ -1593,7 +1592,7 @@ dead_peer_restart(struct vpn_state *vpn, struct timespec now)
 		reinit_with_orig_shared_key(vpn);
 	}
 
-	return vpn->peer_died;
+	return !vpn->peer_died;
 }
 
 void
@@ -1606,8 +1605,6 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 	struct sockaddr_in null_addr = {0};
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
-
-	log_msg(LOG_DEBUG, "timeout: %s", TIMER_TYPE_STR(kev->ident));
 
 	switch (kev->ident) {
 	case RETRANSMIT_PEER_INIT:
@@ -1622,6 +1619,7 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 						VPN_STATE_STR(vpn->state),
 						time_str(inactive_secs, inactive_secs_str,
 						sizeof(inactive_secs_str)));
+					null_addr.sin_family = AF_UNSPEC;
 					manage_ext_sock_connection(vpn,
 					      (struct sockaddr *)&null_addr,
 							 sizeof(null_addr));
@@ -1642,28 +1640,28 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 		}
 		break;
 	case RETRANSMIT_KEY_SWITCH_START:
-		if ((!dead_peer_restart(vpn, now)) && vpn->state == MASTER_KEY_STALE) {
+		if (check_peer_alive(vpn, now) && vpn->state == MASTER_KEY_STALE) {
 			vpn->key_switch_start_retransmits++;
 			log_retransmit(vpn, KEY_SWITCH_START);
 			tx_new_public_key(vpn);
 		}
 		break;
 	case RETRANSMIT_KEY_SWITCH_ACK:
-		if ((!dead_peer_restart(vpn, now)) && vpn->state == SLAVE_KEY_SWITCHING) {
+		if (check_peer_alive(vpn, now) && vpn->state == SLAVE_KEY_SWITCHING) {
 			vpn->key_switch_ack_retransmits++;
 			log_retransmit(vpn, KEY_SWITCH_ACK);
 			tx_new_public_key(vpn);
 		}
 		break;
 	case RETRANSMIT_KEY_READY:
-		if ((!dead_peer_restart(vpn, now)) && vpn->state == MASTER_KEY_READY) {
+		if (check_peer_alive(vpn, now) && vpn->state == MASTER_KEY_READY) {
 			vpn->key_ready_retransmits++;
 			log_retransmit(vpn, KEY_READY);
 			tx_key_ready(vpn);
 		}
 		break;
 	case ACTIVE_HEARTBEAT:
-		if (!dead_peer_restart(vpn, now)) {
+		if (check_peer_alive(vpn, now)) {
 			switch (vpn->state) {
 			case ACTIVE_MASTER:
 				tx_peer_info(vpn);
@@ -1763,6 +1761,7 @@ log_stats(struct vpn_state *vpn)
 		"sessions: %" PRIu32 ", keys used: %" PRIu32 " (max age %" PRIu32 " sec.)\n"
 		"time inactive/active: %s/%s\n"
 		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
+		"decrypt failures: %" PRIu32 "\n"
 		"retransmits (pi/kss/ksa/kr): %" PRIu32
 		"/%" PRIu32 "/%" PRIu32 "/%" PRIu32 "\n"
 		"last peer message: %" PRIu32 " sec. ago\n"
@@ -1777,7 +1776,7 @@ log_stats(struct vpn_state *vpn)
 			 sizeof(cur_inactive_str)),
 		time_str(cur_sess_active_secs, cur_sess_active_str,
 			 sizeof(cur_sess_active_str)),
-		vpn->rx_bytes, vpn->tx_bytes,
+		vpn->rx_bytes, vpn->tx_bytes, vpn->decrypt_failures,
 		vpn->peer_init_retransmits,
 	 vpn->key_switch_start_retransmits, vpn->key_switch_ack_retransmits,
 		vpn->key_ready_retransmits,

@@ -50,7 +50,7 @@ stage.
 
 ## Modes of Operation
 
-### Gateway Mode
+### Network Gateway Mode
 
 In this mode, a pair of hosts--each with an interface on an internal
 network and another on the Internet--provide a communcation path for
@@ -66,7 +66,7 @@ via the VPN gateway can be configured in the default gateway for each
 internal network. The VPN gateways, in effect become layer 3 routers,
 and use the operating system's packet forwarding to move data.
 
-### Client/Server Mode
+### Host/Host Gateway Mode
 
 In this mode, a client host, often operating from behind a firewall,
 connects to a host that acts as a gateway to its internal
@@ -190,7 +190,7 @@ remote_host: vpn-host-gw.some-domain.com
 No route establishment, interface configuration or ARP table commands need 
 to be manually issued. `vpnd` will perform the necessary configuration.
 
-### Statistics and Diagnostics
+## Statistics and Diagnostics
 
 The current state is sent to the current logging output if the process receives
 the `USR1` signal or if `stats` is typed into the console in foreground
@@ -203,3 +203,8 @@ on the command line is:
 or
 
 `socat - UNIX-CONNECT:/var/run/vpnd_stats.sock`
+
+
+## Protocol Details
+
+The `vpnd` network protocol is [explained in detail here](docs/protocol.md) 
