@@ -76,7 +76,7 @@ users connect to corporate networks.
 Here, the network configuration is dynamic due to the nature of mobile
 hosts and NATs. `vpnd` performs the various network stack configuration
 changes, making connections easy to establish. The gateway discovers
-the address of the client by passively listening until the client
+the address of the client host by passively listening until the client
 actually begins communication. When the connection becomes active, the
 gateway host providess the client with an address on its local network
 and becomes an ARP proxy for that address. This arrangement allows
@@ -122,7 +122,10 @@ default) contains one parameter per line, in the following format:
 |local_port|local UDP port to listen on|no, defaults to 1337.|
 |remote_pk|The peer's public key|yes, use values from `keypair` program|
 |remote_host|hostname or IP address of remote peer.|yes, in `host` and `net-gw` role.|
-|client_addr|In `host-gw` mode, the address to assign to the client and the prefix length of the associated network|yes, in `host-gw` role. This  Specified in CIDR notation, ie 192.168.1.1/24|
+|host_addr|In `host-gw` mode, the address to assign to the client and the prefix length of the associated network|yes, in `host-gw` role. Specified in CIDR notation, ie 192.168.1.1/24|
+|resolv_addr|In `host-gw` mode, the address of the DNS resolver to be used by the client|no|
+|resolv_domain|In `host-gw` mode, the DNS search domain to be used by the client|no|
+|resolvconf_path|In `host` mode, the path to the `resolvconf` utility|no, defaults to `/sbin/resolvconf`|
 |remote_port|UDP port on peer to listen on|no, defaults to 1337.|
 |max_key_age|Maximum age for ephemeral key, in seconds.|no, defaults to 60 seconds. Range is 30-3,600|
 |max_key_packets|Maximum number of packets that can be sent with ephemeral key|no, defaults to 100,000. Range is 5000-10,000,000|
@@ -140,7 +143,7 @@ both networks have another host that acts as the default router.
 ##### Gateway #1 config:
 
 ```
-local_sk: <clocal secret key>
+local_sk: <local secret key>
 remote_pk: <gateway #2 public key>
 role: net-gw
 remote_host: vpn-gw.network-2.com

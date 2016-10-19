@@ -154,9 +154,12 @@ struct vpn_msg {
 
 struct vpn_peer_info {
 	uint32_t	peer_id;
-	sa_family_t	addr_family;
-	uint8_t		prefix_len;
-	unsigned char	addr[sizeof(struct in6_addr)];
+	sa_family_t	host_addr_family;
+	uint8_t		host_prefix_len;
+	sa_family_t	resolv_addr_family;
+	unsigned char	host_addr[sizeof(struct in6_addr)];
+	unsigned char	resolv_addr[sizeof(struct in6_addr)];
+	char		resolv_domain[32];
 };
 
 /* Finite state machine state data. */
@@ -165,6 +168,7 @@ struct vpn_state {
 	vpn_state	state;
 	char		tun_name  [8];
 	char		nonce_filename[256];
+	char		resolvconf_path[256];
 	uint32_t	peer_id;
 	struct vpn_peer_info tx_peer_info;
 	struct vpn_peer_info rx_peer_info;
@@ -192,7 +196,7 @@ struct vpn_state {
 	int		ext_sock;
 	int		ctrl_sock;
 	int		stats_sock;
-	struct kevent	kev_changes[6];
+	struct kevent	kev_changes[8];
 	uint32_t	kev_change_count;
 	uint32_t	rx_bytes;
 	uint32_t	tx_bytes;
@@ -220,14 +224,16 @@ void		addr2net_with_netmask(sa_family_t af, void *host_addr, unsigned char *netm
 void		addr2net_with_prefix(sa_family_t af, void *host_addr, uint8_t prefix_len);
 sa_family_t	inet_pton_any(const char *restrict src, void *restrict dst);
 void		spawn_subprocess(char *cmd);
-void		add_proxy_arp_for_host(struct vpn_state *vpn);
-void		config_host_ptp_addrs(struct vpn_state *vpn);
-void		config_host_gw_ptp_addrs(struct vpn_state *vpn);
-void		add_route_to_host_gw_net(struct vpn_state *vpn);
+void		manage_resolver(struct vpn_state *vpn);
+void		manage_proxy_arp_for_host(struct vpn_state *vpn);
+void		manage_host_ptp_addrs(struct vpn_state *vpn);
+void		manage_host_gw_ptp_addrs(struct vpn_state *vpn);
+void		manage_route_to_host_gw_net(struct vpn_state *vpn);
+void		manage_network_config(struct vpn_state *vpn);
 bool		manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, socklen_t remote_addr_len);
 void		generate_peer_id(struct vpn_state *vpn);
 bool		init      (bool fflag, char *config_fname, struct vpn_state *vpn);
-void		reinit_with_orig_shared_key(struct vpn_state *vpn);
+void		return_to_init_state(struct vpn_state *vpn);
 void		change_state(struct vpn_state *vpn, vpn_state new_state);
 void		log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type);
 void		log_nonce (struct vpn_state *vpn, char *prefix, unsigned char *nonce);
@@ -250,7 +256,7 @@ void		stats_sock_input(struct vpn_state *vpn);
 void		stdin_input(struct vpn_state *vpn);
 bool		check_peer_alive(struct vpn_state *vpn, struct timespec now);
 void		process_timeout(struct vpn_state *vpn, struct kevent *kev);
-char           *string_for_peer_info(struct vpn_peer_info *peer_info, char *prefix_str, char *peer_info_str, size_t peer_info_str_sz);
+char           *string_for_addr(sa_family_t af, void *addr, char *addr_str, size_t addr_str_sz);
 void		log_stats (struct vpn_state *vpn);
 bool		run       (struct vpn_state *vpn);
 
@@ -261,7 +267,7 @@ log_msg(int priority, const char *msg,...)
 	time_t		now;
 	struct tm	now_tm;
 	char		timestamp_str[32];
-	char		msg_str   [512];
+	char		msg_str   [1024];
 
 	va_start(ap, msg);
 	if (fflag) {
@@ -337,8 +343,6 @@ read_nonce_reset_point(struct vpn_state *vpn, unsigned char *nonce)
 			ok = false;
 			log_msg(LOG_ERR, "Can't read nonce from %s: %s\n",
 				vpn->nonce_filename, strerror(errno));
-		} else {
-			log_nonce(vpn, "read nonce reset point", nonce);
 		}
 	}
 	if (f != NULL)
@@ -494,6 +498,7 @@ spawn_subprocess(char *cmd)
 		log_msg(LOG_ERR, "spawn of \"%s\" failed: %s", cmd_with_stderr_redirect,
 			strerror(errno));
 	} else {
+
 		while (fgets(cmd_out, sizeof(cmd_out), cmd_fd) != NULL) {
 			newline = strrchr(cmd_out, '\n');
 			if (newline)
@@ -509,88 +514,267 @@ spawn_subprocess(char *cmd)
 }
 
 void
-add_proxy_arp_for_host(struct vpn_state *vpn)
+manage_resolver(struct vpn_state *vpn)
 {
-	char		client_addr_str[INET6_ADDRSTRLEN];
+	bool		ok = true;
+	char		resolv_data_filename[512] = {'\0'};
+	int		resolv_data_fd;
+	char		resolv_data_str[256];
+	char		resolv_addr_str[INET6_ADDRSTRLEN];
+	char		resolvconf_cmd[512];
+	FILE           *cmd_fd;
+	char		cmd_out   [256];
+	char           *newline;
+
+
+	switch (vpn->state) {
+	case INIT:
+		snprintf(resolvconf_cmd, sizeof(resolvconf_cmd), "%s -d %s 2>&1",
+			 vpn->resolvconf_path, vpn->tun_name);
+		break;
+	case ACTIVE_MASTER:
+	case ACTIVE_SLAVE:
+		snprintf(resolv_data_filename, sizeof(resolv_data_filename),
+			 "/tmp/vpnd_resolv_%s.XXXXXX", vpn->tun_name);
+		resolv_data_fd = mkstemp(resolv_data_filename);
+		if (resolv_data_fd == -1) {
+			ok = false;
+			log_msg(LOG_ERR, "creating of resolvconf temp data failed -- %s",
+				strerror(errno));
+		}
+		if (ok) {
+			snprintf(resolv_data_str, sizeof(resolv_data_str), "nameserver %s\n",
+			     inet_ntop(vpn->rx_peer_info.resolv_addr_family,
+			    &vpn->rx_peer_info.resolv_addr, resolv_addr_str,
+				       sizeof(resolv_addr_str)));
+			write(resolv_data_fd, resolv_data_str, strlen(resolv_data_str));
+
+			if (strlen(vpn->rx_peer_info.resolv_domain) > 0) {
+				snprintf(resolv_data_str, sizeof(resolv_data_str), "domain %s\n",
+					 vpn->rx_peer_info.resolv_domain);
+				write(resolv_data_fd, resolv_data_str, strlen(resolv_data_str));
+			}
+			close(resolv_data_fd);
+			snprintf(resolvconf_cmd, sizeof(resolvconf_cmd), "%s -a %s < %s 2>&1",
+				 vpn->resolvconf_path, vpn->tun_name, resolv_data_filename);
+		}
+		break;
+	default:
+		ok = false;
+		log_msg(LOG_ERR, "cannot manage resolver in %s state",
+			VPN_STATE_STR(vpn->state));
+	}
+
+	if (ok) {
+
+		log_msg(LOG_NOTICE, "%s: %s", VPN_STATE_STR(vpn->state), resolvconf_cmd);
+		if ((cmd_fd = popen(resolvconf_cmd, "r")) == NULL) {
+			log_msg(LOG_ERR, "spawn of \"%s\" failed: %s", resolvconf_cmd,
+				strerror(errno));
+		} else {
+			while (fgets(cmd_out, sizeof(cmd_out), cmd_fd) != NULL) {
+				newline = strrchr(cmd_out, '\n');
+				if (newline)
+					*newline = '\0';
+				log_msg(LOG_NOTICE, "==> %s", cmd_out);
+			}
+
+			if (ferror(cmd_fd))
+				log_msg(LOG_ERR, "reading subprocess output: %s", strerror(errno));
+
+			pclose(cmd_fd);
+		}
+	}
+	unlink(resolv_data_filename);
+}
+
+void
+manage_proxy_arp_for_host(struct vpn_state *vpn)
+{
+	bool		ok = true;
+	char		host_addr_str[INET6_ADDRSTRLEN];
 	char		cmd       [256] = {'\0'};
 
-	if (inet_ntop(vpn->tx_peer_info.addr_family, &vpn->tx_peer_info.addr,
-		      client_addr_str, sizeof(client_addr_str)) == NULL) {
-		log_msg(LOG_ERR, "couldn't format address (AF %u) for adding "
-			" proxy ARP: %s", vpn->tx_peer_info.addr_family, strerror(errno));
-	} else {
-		if (vpn->tx_peer_info.addr_family == AF_INET)
-			snprintf(cmd, sizeof(cmd), "arp -s %s auto pub", client_addr_str);
-		else
-			snprintf(cmd, sizeof(cmd), "ndp -s %s proxy", client_addr_str);
-		log_msg(LOG_NOTICE, "%s add ARP/NDP: %s", VPN_ROLE_STR(vpn->role), cmd);
+	if (inet_ntop(vpn->tx_peer_info.host_addr_family, &vpn->tx_peer_info.host_addr,
+		      host_addr_str, sizeof(host_addr_str)) == NULL) {
+		ok = false;
+		log_msg(LOG_ERR, "couldn't format address (AF %u) for managing "
+			" proxy ARP: %s", vpn->tx_peer_info.host_addr_family,
+			strerror(errno));
+	}
+	if (ok) {
+		switch (vpn->state) {
+		case INIT:
+			switch (vpn->tx_peer_info.host_addr_family) {
+			case AF_INET:
+				snprintf(cmd, sizeof(cmd), "arp -d %s", host_addr_str);
+				break;
+			case AF_INET6:
+				snprintf(cmd, sizeof(cmd), "ndp -d %s", host_addr_str);
+			default:
+				ok = false;
+				log_msg(LOG_ERR, "unknown address type (%u) to remove ARP/NDP",
+					vpn->tx_peer_info.host_addr_family);
+			}
+			break;
+		case ACTIVE_MASTER:
+		case ACTIVE_SLAVE:
+			switch (vpn->tx_peer_info.host_addr_family) {
+			case AF_INET:
+				snprintf(cmd, sizeof(cmd), "arp -s %s auto pub", host_addr_str);
+				break;
+			case AF_INET6:
+				snprintf(cmd, sizeof(cmd), "ndp -s %s proxy", host_addr_str);
+			default:
+				ok = false;
+				log_msg(LOG_ERR, "unknown address type (%u) to add ARP/NDP",
+					vpn->tx_peer_info.host_addr_family);
+
+			}
+			break;
+		default:
+			ok = false;
+			log_msg(LOG_ERR, "cannot manage ARP/NDP in %s state",
+				VPN_STATE_STR(vpn->state));
+		}
+	}
+	if (ok) {
+		log_msg(LOG_NOTICE, "%s: %s", VPN_ROLE_STR(vpn->role), cmd);
 		spawn_subprocess(cmd);
 	}
 }
 
 void
-config_host_ptp_addrs(struct vpn_state *vpn)
+manage_host_ptp_addrs(struct vpn_state *vpn)
 {
-	char		client_addr_str[INET6_ADDRSTRLEN];
+	char		host_addr_str[INET6_ADDRSTRLEN];
 	char		cmd       [256] = {'\0'};
 
-	if (inet_ntop(vpn->rx_peer_info.addr_family, &vpn->rx_peer_info.addr,
-		      client_addr_str, sizeof(client_addr_str)) == NULL) {
+	if (inet_ntop(vpn->rx_peer_info.host_addr_family, &vpn->rx_peer_info.host_addr,
+		      host_addr_str, sizeof(host_addr_str)) == NULL) {
 		log_msg(LOG_ERR, "couldn't format address (AF %u) for ifconfig of "
-			"host tunnel: %s", vpn->rx_peer_info.addr_family, strerror(errno));
+		      "host tunnel: %s", vpn->rx_peer_info.host_addr_family,
+			strerror(errno));
 	} else {
-		snprintf(cmd, sizeof(cmd), "ifconfig %s %s 10.0.0.1",
-			 vpn->tun_name, client_addr_str);
-		log_msg(LOG_NOTICE, "%s config p-t-p addrs: %s",
-			VPN_ROLE_STR(vpn->role), cmd);
-		spawn_subprocess(cmd);
+		switch (vpn->state) {
+		case INIT:
+			/*
+			 * I think it's OK to just leave the HOST tunnel
+			 * interface configured if the session ends. This
+			 * placeholder is here in case that turns out to not
+			 * be be case.
+			 */
+			break;
+		case ACTIVE_MASTER:
+		case ACTIVE_SLAVE:
+			snprintf(cmd, sizeof(cmd), "ifconfig %s %s 10.0.0.1",
+				 vpn->tun_name, host_addr_str);
+			log_msg(LOG_NOTICE, "%s: %s",
+				VPN_ROLE_STR(vpn->role), cmd);
+			spawn_subprocess(cmd);
+			break;
+		default:
+			log_msg(LOG_ERR, "cannot manage %s P-T-P addrs in %s state",
+			VPN_ROLE_STR(vpn->role), VPN_STATE_STR(vpn->state));
+		}
 	}
 }
 
 void
-config_host_gw_ptp_addrs(struct vpn_state *vpn)
+manage_host_gw_ptp_addrs(struct vpn_state *vpn)
 {
-	char		client_addr_str[INET6_ADDRSTRLEN];
+	char		host_addr_str[INET6_ADDRSTRLEN];
 	char		cmd       [256] = {'\0'};
 
-	if (inet_ntop(vpn->tx_peer_info.addr_family, &vpn->tx_peer_info.addr,
-		      client_addr_str, sizeof(client_addr_str)) == NULL) {
+	if (inet_ntop(vpn->tx_peer_info.host_addr_family, &vpn->tx_peer_info.host_addr,
+		      host_addr_str, sizeof(host_addr_str)) == NULL) {
 		log_msg(LOG_ERR, "couldn't format address (AF %u) for ifconfig "
 			"of host gw tunnel: %s",
-			vpn->tx_peer_info.addr_family, strerror(errno));
+			vpn->tx_peer_info.host_addr_family, strerror(errno));
 	} else {
-		snprintf(cmd, sizeof(cmd), "ifconfig %s 10.0.0.1 %s",
-			 vpn->tun_name, client_addr_str);
-		log_msg(LOG_NOTICE, "%s config p-t-p addrs: %s",
-			VPN_ROLE_STR(vpn->role), cmd);
-		spawn_subprocess(cmd);
+		switch (vpn->state) {
+		case INIT:
+			/*
+			 * I think it's OK to just leave the HOST-GW tunnel
+			 * interface configured if the session ends.
+			 * Placeholder is here in case that turns out to not
+			 * be be case.
+			 */
+			break;
+		case ACTIVE_MASTER:
+		case ACTIVE_SLAVE:
+			snprintf(cmd, sizeof(cmd), "ifconfig %s 10.0.0.1 %s",
+				 vpn->tun_name, host_addr_str);
+			log_msg(LOG_NOTICE, "%s: %s", VPN_ROLE_STR(vpn->role), cmd);
+			spawn_subprocess(cmd);
+			break;
+		default:
+			log_msg(LOG_ERR, "cannot manage %s P-T-P addrs in %s state",
+			VPN_ROLE_STR(vpn->role), VPN_STATE_STR(vpn->state));
+		}
 	}
 }
 
 void
-add_route_to_host_gw_net(struct vpn_state *vpn)
+manage_route_to_host_gw_net(struct vpn_state *vpn)
 {
 	unsigned char	net_addr[sizeof(struct in6_addr)];
 	char		net_addr_str[INET6_ADDRSTRLEN];
 	char		cmd       [256] = {'\0'};
+	char           *action_str = "\0";
 
-	memcpy(net_addr, &vpn->rx_peer_info.addr,
-	       (vpn->rx_peer_info.addr_family == AF_INET)
+	memcpy(net_addr, &vpn->rx_peer_info.host_addr,
+	       (vpn->rx_peer_info.host_addr_family == AF_INET)
 	       ? sizeof(struct in_addr) : sizeof(struct in6_addr));
-	addr2net_with_prefix(vpn->rx_peer_info.addr_family, net_addr,
-			     vpn->rx_peer_info.prefix_len);
+	addr2net_with_prefix(vpn->rx_peer_info.host_addr_family, net_addr,
+			     vpn->rx_peer_info.host_prefix_len);
 
-	if (inet_ntop(vpn->rx_peer_info.addr_family, net_addr, net_addr_str,
+	if (inet_ntop(vpn->rx_peer_info.host_addr_family, net_addr, net_addr_str,
 		      sizeof(net_addr_str)) == NULL) {
 		log_msg(LOG_ERR, "couldn't format address (AF %u) for adding route "
 			" to host gw net: %s",
-			vpn->rx_peer_info.addr_family, strerror(errno));
+			vpn->rx_peer_info.host_addr_family, strerror(errno));
 	} else {
-		snprintf(cmd, sizeof(cmd), "route add %s/%u -interface %s",
-		 net_addr_str, vpn->rx_peer_info.prefix_len, vpn->tun_name);
-		log_msg(LOG_NOTICE, "%s add route to remote net: %s",
-			VPN_ROLE_STR(vpn->role), cmd);
-		spawn_subprocess(cmd);
+		switch (vpn->state) {
+		case INIT:
+			action_str = "delete";
+			break;
+		case ACTIVE_MASTER:
+		case ACTIVE_SLAVE:
+			action_str = "add";
+			break;
+		default:
+			log_msg(LOG_ERR, "cannot manage %s HOST route to HOST-GW "
+			     "network in %s state", VPN_ROLE_STR(vpn->role),
+				VPN_STATE_STR(vpn->state));
+		}
+		if (strlen(action_str) > 0) {
+			snprintf(cmd, sizeof(cmd), "route %s %s/%u -interface %s",
+				 action_str, net_addr_str, vpn->rx_peer_info.host_prefix_len,
+				 vpn->tun_name);
+			log_msg(LOG_NOTICE, "%s: %s", VPN_ROLE_STR(vpn->role), cmd);
+			spawn_subprocess(cmd);
+		}
+	}
+}
+
+void
+manage_network_config(struct vpn_state *vpn)
+{
+	switch (vpn->role) {
+	case HOST:
+		manage_host_ptp_addrs(vpn);
+		manage_route_to_host_gw_net(vpn);
+		if (vpn->rx_peer_info.resolv_addr_family == AF_INET ||
+		    vpn->rx_peer_info.resolv_addr_family == AF_INET6)
+			manage_resolver(vpn);
+		break;
+	case HOST_GW:
+		manage_host_gw_ptp_addrs(vpn);
+		manage_proxy_arp_for_host(vpn);
+		break;
+	default:
+		break;
 	}
 }
 
@@ -636,7 +820,9 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 	char		remote_pk_hex[(crypto_box_PUBLICKEYBYTES * 2) + 1] = {'\0'};
 	char		remote_host[INET6_ADDRSTRLEN] = {'\0'};
 	char		remote_port[6] = {'\0'};
-	char		client_addr[INET6_ADDRSTRLEN] = {'\0'};
+	char		host_addr [INET6_ADDRSTRLEN] = {'\0'};
+	char		resolv_addr[INET6_ADDRSTRLEN] = {'\0'};
+	char		resolv_domain[32] = {'\0'};
 	char		max_key_age_secs[16] = {'\0'};
 	char		max_key_sent_packet_count[16] = {'\0'};
 	char		nonce_reset_incr[16] = {'\0'};
@@ -658,8 +844,14 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 		remote_host, sizeof(remote_host), NULL},
 		{"remote port", "remote_port:", sizeof("remote_port:"),
 		remote_port, sizeof(remote_port), "1337"},
-		{"client address", "client_addr:", sizeof("client_addr:"),
-		client_addr, sizeof(client_addr), NULL},
+		{"host address", "host_addr:", sizeof("host_addr:"),
+		host_addr, sizeof(host_addr), NULL},
+		{"resolver address", "resolv_addr:", sizeof("resolv_addr:"),
+		resolv_addr, sizeof(resolv_addr), NULL},
+		{"resolver domain", "resolv_domain:", sizeof("resolv_domain:"),
+		resolv_domain, sizeof(resolv_domain), NULL},
+		{"resolvconf path", "resolvconf_path:", sizeof("resolvconf_path:"),
+		vpn->resolvconf_path, sizeof(vpn->resolvconf_path), "/sbin/resolvconf"},
 		{"max key age (secs.)", "max_key_age:", sizeof("max_key_age:"),
 		max_key_age_secs, sizeof(max_key_age_secs), "60"},
 		{"max key packets", "max_key_packets:", sizeof("max_key_packets:"),
@@ -708,7 +900,7 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 		 * 
 		 * remote_host: require in host and net gateway role
 		 * 
-		 * client_addr: require in host gateway role.
+		 * host_addr: require in host gateway role.
 		 * 
 		 * stats_prefix: let the default be the hostname, which must be
 		 * computed and hence cannot be hardcoded into the array of
@@ -719,7 +911,9 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 			if (strlen(c[i].value) == 0) {
 				if (c[i].default_value == NULL) {
 					if (!(strcmp(c[i].name, "remote_host:") == 0 ||
-					      strcmp(c[i].name, "client_addr:") == 0)) {
+					      strcmp(c[i].name, "host_addr:") == 0 ||
+					      strcmp(c[i].name, "resolv_addr:") == 0 ||
+					      strcmp(c[i].name, "resolv_domain:") == 0)) {
 						ok = false;
 						log_msg(LOG_ERR, "%s not specified", c[i].desc);
 					}
@@ -744,35 +938,51 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 			vpn->role = NET_GW;
 		} else if (strcmp(role, "host-gw") == 0) {
 			vpn->role = HOST_GW;
-			if (strlen(client_addr) == 0) {
+			if (strlen(host_addr) == 0) {
 				ok = false;
-				log_msg(LOG_ERR, "client address must be "
+				log_msg(LOG_ERR, "host address must be "
 					"specified when in \"%s\" role", VPN_ROLE_STR(vpn->role));
 			}
 			if (ok) {
-				if ((prefix_start = strchr(client_addr, '/')) != NULL) {
+				if ((prefix_start = strchr(host_addr, '/')) != NULL) {
 					*prefix_start = '\0';
 					prefix_start++;
 				} else {
 					ok = false;
 					log_msg(LOG_ERR, "can't find prefix in "
-						"client address");
+						"host address");
 				}
 			}
 			if (ok) {
-				vpn->tx_peer_info.addr_family = inet_pton_any(client_addr,
-						   &vpn->tx_peer_info.addr);
-				if (vpn->tx_peer_info.addr_family == AF_UNSPEC)
+				vpn->tx_peer_info.host_addr_family = inet_pton_any(host_addr,
+					      &vpn->tx_peer_info.host_addr);
+				if (vpn->tx_peer_info.host_addr_family == AF_UNSPEC)
 					ok = false;
 			}
 			if (ok) {
-				max_prefix_len = (vpn->tx_peer_info.addr_family == AF_INET)
+				max_prefix_len = (vpn->tx_peer_info.host_addr_family == AF_INET)
 					? 32 : 128;
-				vpn->tx_peer_info.prefix_len = strtonum(prefix_start,
+				vpn->tx_peer_info.host_prefix_len = strtonum(prefix_start,
 						0, max_prefix_len, &errstr);
 				if (errstr) {
 					ok = false;
 					log_msg(LOG_ERR, "prefix length too %s", errstr);
+				}
+			}
+			if (ok) {
+				if (resolv_addr != NULL && strlen(resolv_addr) > 0) {
+					vpn->tx_peer_info.resolv_addr_family = inet_pton_any(resolv_addr,
+					    &vpn->tx_peer_info.resolv_addr);
+					if (vpn->tx_peer_info.resolv_addr_family == AF_UNSPEC)
+						ok = false;
+				} else {
+					vpn->tx_peer_info.resolv_addr_family = AF_UNSPEC;
+				}
+			}
+			if (ok) {
+				if (resolv_domain != NULL && strlen(resolv_domain) > 0) {
+					strlcpy(vpn->tx_peer_info.resolv_domain, resolv_domain,
+						sizeof(vpn->tx_peer_info.resolv_domain));
 				}
 			}
 		} else if (strcmp(role, "host") == 0) {
@@ -942,7 +1152,9 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 		}
 		if (ok) {
 			generate_peer_id(vpn);
-			if (!read_nonce_reset_point(vpn, vpn->nonce)) {
+			if (read_nonce_reset_point(vpn, vpn->nonce)) {
+				log_nonce(vpn, "read nonce reset point", vpn->nonce);
+			} else {
 				randombytes_buf(vpn->nonce, sizeof(vpn->nonce));
 				log_nonce(vpn, "generating initial nonce", vpn->nonce);
 			}
@@ -962,8 +1174,17 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 			       EVFILT_SIGNAL, EV_ADD | EV_ENABLE, 0, 0, 0);
 			vpn->kev_change_count++;
 			signal(SIGUSR1, SIG_IGN);
+			EV_SET(&vpn->kev_changes[4], SIGINT,
+			       EVFILT_SIGNAL, EV_ADD | EV_ENABLE, 0, 0, 0);
+			vpn->kev_change_count++;
+			signal(SIGINT, SIG_IGN);
+			EV_SET(&vpn->kev_changes[5], SIGTERM,
+			       EVFILT_SIGNAL, EV_ADD | EV_ENABLE, 0, 0, 0);
+			vpn->kev_change_count++;
+			signal(SIGTERM, SIG_IGN);
+
 			if (fflag) {
-				EV_SET(&vpn->kev_changes[4], STDIN_FILENO,
+				EV_SET(&vpn->kev_changes[6], STDIN_FILENO,
 				  EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
 				vpn->kev_change_count++;
 			}
@@ -1007,11 +1228,13 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 }
 
 void
-reinit_with_orig_shared_key(struct vpn_state *vpn)
+return_to_init_state(struct vpn_state *vpn)
 {
 	memcpy(vpn->cur_shared_key, vpn->orig_shared_key,
 	       sizeof(vpn->cur_shared_key));
 	change_state(vpn, INIT);
+	manage_network_config(vpn);
+
 }
 
 void
@@ -1053,19 +1276,7 @@ change_state(struct vpn_state *vpn, vpn_state new_state)
 			vpn->inactive_secs += inactive_secs;
 			vpn->peer_died = false;
 			vpn->sess_starts++;
-
-			switch (vpn->role) {
-			case HOST:
-				config_host_ptp_addrs(vpn);
-				add_route_to_host_gw_net(vpn);
-				break;
-			case HOST_GW:
-				config_host_gw_ptp_addrs(vpn);
-				add_proxy_arp_for_host(vpn);
-				break;
-			default:
-				break;
-			}
+			manage_network_config(vpn);
 			log_msg(LOG_NOTICE, "%s: session #%" PRIu32 " started "
 				"in %s",
 				VPN_STATE_STR(vpn->state),
@@ -1239,7 +1450,6 @@ tx_key_ready(struct vpn_state *vpn)
 {
 	bool		ok;
 	struct vpn_msg	msg;
-	message_type	type;
 
 	ok = true;
 	msg.type = KEY_READY;
@@ -1251,7 +1461,7 @@ tx_key_ready(struct vpn_state *vpn)
 	default:
 		ok = false;
 		log_msg(LOG_ERR, "%s: may not transmit %s in %s state",
-			VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(type),
+			VPN_ROLE_STR(vpn->role), MSG_TYPE_STR(msg.type),
 			VPN_STATE_STR(vpn->state));
 	}
 
@@ -1577,21 +1787,18 @@ check_peer_alive(struct vpn_state *vpn, struct timespec now)
 	if ((now.tv_sec - vpn->peer_last_heartbeat_ts.tv_sec)
 	    <= PEER_MAX_HEARTBEAT_INTERVAL_SECS) {
 		vpn->peer_died = false;
-	} else {
-		if (vpn->peer_died == false) {
-			vpn->peer_died = true;
-			clock_gettime(CLOCK_MONOTONIC, &vpn->sess_end_ts);
-			cur_sess_active_secs = vpn->sess_end_ts.tv_sec -
-				vpn->sess_start_ts.tv_sec;
-			vpn->sess_active_secs += cur_sess_active_secs;
-			log_msg(LOG_ERR, "%s: peer died after %s.",
-				VPN_STATE_STR(vpn->state),
-			 time_str(cur_sess_active_secs, cur_sess_active_str,
-				  sizeof(cur_sess_active_str)));
-		}
-		reinit_with_orig_shared_key(vpn);
+	} else if (vpn->peer_died == false) {
+		vpn->peer_died = true;
+		clock_gettime(CLOCK_MONOTONIC, &vpn->sess_end_ts);
+		cur_sess_active_secs = vpn->sess_end_ts.tv_sec -
+			vpn->sess_start_ts.tv_sec;
+		vpn->sess_active_secs += cur_sess_active_secs;
+		log_msg(LOG_ERR, "%s: peer died after %s.",
+			VPN_STATE_STR(vpn->state),
+			time_str(cur_sess_active_secs, cur_sess_active_str,
+				 sizeof(cur_sess_active_str)));
+		return_to_init_state(vpn);
 	}
-
 	return !vpn->peer_died;
 }
 
@@ -1688,36 +1895,22 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 }
 
 char           *
-string_for_peer_info(struct vpn_peer_info *peer_info, char *prefix_str, char *peer_info_str, size_t peer_info_str_sz)
+string_for_addr(sa_family_t af, void *addr, char *addr_str, size_t addr_str_sz)
 {
-	bool		ok = true;
-	char		peer_addr_str[INET6_ADDRSTRLEN];
-	char           *addr_family_str;
-
-	switch (peer_info->addr_family) {
-	case AF_INET:
-		addr_family_str = "IPv4";
+	switch (af) {
+	case AF_UNSPEC:
+		strlcpy(addr_str, "<none>", addr_str_sz);
 		break;
+	case AF_INET:
 	case AF_INET6:
-		addr_family_str = "IPv6";
+		inet_ntop(af, addr, addr_str, addr_str_sz);
 		break;
 	default:
-		ok = false;
-		addr_family_str = "UNKNOWN";
+		snprintf(addr_str, addr_str_sz, "<invalid, (af %u)>", af);
+
 	}
 
-	if (ok) {
-		inet_ntop(peer_info->addr_family, &peer_info->addr, peer_addr_str,
-			  INET6_ADDRSTRLEN);
-		snprintf(peer_info_str, peer_info_str_sz,
-		 "%s: %s %s/%u", prefix_str, addr_family_str, peer_addr_str,
-			 peer_info->prefix_len);
-	} else {
-		snprintf(peer_info_str, peer_info_str_sz, "%s: unknown address type (%u)",
-			 prefix_str, peer_info->addr_family);
-	}
-
-	return peer_info_str;
+	return addr_str;
 }
 
 void
@@ -1730,6 +1923,8 @@ log_stats(struct vpn_state *vpn)
 	char		tx_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
 	char		rp_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
 	char		rx_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
+	char		host_addr_str[INET6_ADDRSTRLEN];
+	char		resolv_addr_str[INET6_ADDRSTRLEN];
 	char		peer_info_str[256] = {'\0'};
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
@@ -1740,12 +1935,34 @@ log_stats(struct vpn_state *vpn)
 
 	switch (vpn->role) {
 	case HOST:
-		string_for_peer_info(&vpn->rx_peer_info, "\nRX peerinfo", peer_info_str,
-				     sizeof(peer_info_str));
+		snprintf(peer_info_str, sizeof(peer_info_str),
+			 "\nRX peerinfo:\n"
+			 "  host: %s/%d\n"
+			 "  resolver: %s\n"
+			 "  domain: %s",
+			 string_for_addr(vpn->rx_peer_info.host_addr_family,
+				&vpn->rx_peer_info.host_addr, host_addr_str,
+		  sizeof(host_addr_str)), vpn->rx_peer_info.host_prefix_len,
+		       string_for_addr(vpn->rx_peer_info.resolv_addr_family,
+			    &vpn->rx_peer_info.resolv_addr, resolv_addr_str,
+				       sizeof(resolv_addr_str)),
+			 strlen(vpn->rx_peer_info.resolv_domain) > 0
+			 ? vpn->rx_peer_info.resolv_domain : "<none>");
 		break;
 	case HOST_GW:
-		string_for_peer_info(&vpn->tx_peer_info, "\nTX peerinfo", peer_info_str,
-				     sizeof(peer_info_str));
+		snprintf(peer_info_str, sizeof(peer_info_str),
+			 "\nTX peerinfo:\n"
+			 "  host: %s/%d\n"
+			 "  resolver: %s\n"
+			 "  domain: %s",
+			 string_for_addr(vpn->tx_peer_info.host_addr_family,
+				&vpn->tx_peer_info.host_addr, host_addr_str,
+		  sizeof(host_addr_str)), vpn->tx_peer_info.host_prefix_len,
+		       string_for_addr(vpn->tx_peer_info.resolv_addr_family,
+			    &vpn->tx_peer_info.resolv_addr, resolv_addr_str,
+				       sizeof(resolv_addr_str)),
+			 strlen(vpn->tx_peer_info.resolv_domain) > 0
+			 ? vpn->tx_peer_info.resolv_domain : "<none>");
 		break;
 	default:
 		break;
@@ -1757,7 +1974,8 @@ log_stats(struct vpn_state *vpn)
 		cur_inactive_secs += (now.tv_sec - vpn->sess_end_ts.tv_sec);
 	}
 
-	log_msg(LOG_NOTICE, "%s is %s:\n"
+	log_msg(LOG_NOTICE, "--- vpnd statistics ---\n"
+		"%s is %s:\n"
 		"sessions: %" PRIu32 ", keys used: %" PRIu32 " (max age %" PRIu32 " sec.)\n"
 		"time inactive/active: %s/%s\n"
 		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
@@ -1831,7 +2049,21 @@ run(struct vpn_state *vpn)
 					process_timeout(vpn, &event);
 					break;
 				case EVFILT_SIGNAL:
-					log_stats(vpn);
+					switch (event.ident) {
+					case SIGUSR1:
+						log_stats(vpn);
+						break;
+					case SIGINT:
+					case SIGTERM:
+						ok = false;
+						log_msg(LOG_NOTICE, "shutting down (signal %u)",
+							event.ident);
+						return_to_init_state(vpn);
+						break;
+					default:
+						break;
+					}
+
 					break;
 				default:
 					log_msg(LOG_WARNING, "unhandled event type: %d",

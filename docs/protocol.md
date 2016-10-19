@@ -82,7 +82,7 @@ random numbers and comparing which is largest.
 ## Retransmission
 
 Every transmission of a protocol control (non-data) message starts a
-retranmission timer. On expiry, the timeout handler retransmits the
+retransmission timer. On expiry, the timeout handler retransmits the
 message if the peer is believed to be alive and the state machine has
 not progressed to the next state.
 
