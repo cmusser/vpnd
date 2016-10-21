@@ -339,7 +339,7 @@ read_nonce_reset_point(struct vpn_state *vpn, unsigned char *nonce)
 			vpn->nonce_filename, strerror(errno));
 	}
 	if (ok) {
-		if (fread(nonce, crypto_box_NONCEBYTES, 1, f) < 0) {
+		if (fread(nonce, crypto_box_NONCEBYTES, 1, f) < 1) {
 			ok = false;
 			log_msg(LOG_ERR, "Can't read nonce from %s: %s\n",
 				vpn->nonce_filename, strerror(errno));
@@ -371,7 +371,7 @@ write_nonce_reset_point(struct vpn_state *vpn)
 		sodium_add(nonce_reset_point, vpn->nonce_reset_incr_bin,
 			   sizeof(nonce_reset_point));
 		log_nonce(vpn, "create nonce reset point", nonce_reset_point);
-		if (fwrite(nonce_reset_point, sizeof(nonce_reset_point), 1, f) < 0) {
+		if (fwrite(nonce_reset_point, sizeof(nonce_reset_point), 1, f) < 1) {
 			ok = false;
 			log_msg(LOG_ERR, "failed to write nonce to %s: %s\n",
 				vpn->nonce_filename, strerror(errno));
@@ -781,7 +781,7 @@ manage_network_config(struct vpn_state *vpn)
 bool
 manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, socklen_t remote_addr_len)
 {
-	bool		ok;
+	bool		ok = true;
 	char		remote_addr_str[INET6_ADDRSTRLEN] = "<ADDR>";
 
 	format_sockaddr(remote_addr->sa_family, remote_addr,
@@ -1787,16 +1787,19 @@ check_peer_alive(struct vpn_state *vpn, struct timespec now)
 	if ((now.tv_sec - vpn->peer_last_heartbeat_ts.tv_sec)
 	    <= PEER_MAX_HEARTBEAT_INTERVAL_SECS) {
 		vpn->peer_died = false;
-	} else if (vpn->peer_died == false) {
-		vpn->peer_died = true;
-		clock_gettime(CLOCK_MONOTONIC, &vpn->sess_end_ts);
-		cur_sess_active_secs = vpn->sess_end_ts.tv_sec -
-			vpn->sess_start_ts.tv_sec;
-		vpn->sess_active_secs += cur_sess_active_secs;
-		log_msg(LOG_ERR, "%s: peer died after %s.",
-			VPN_STATE_STR(vpn->state),
-			time_str(cur_sess_active_secs, cur_sess_active_str,
-				 sizeof(cur_sess_active_str)));
+	} else {
+		if (vpn->peer_died == false) {
+			vpn->peer_died = true;
+			clock_gettime(CLOCK_MONOTONIC, &vpn->sess_end_ts);
+			cur_sess_active_secs = vpn->sess_end_ts.tv_sec -
+				vpn->sess_start_ts.tv_sec;
+			vpn->sess_active_secs += cur_sess_active_secs;
+			log_msg(LOG_ERR, "%s: peer died after %s.",
+				VPN_STATE_STR(vpn->state),
+			 time_str(cur_sess_active_secs, cur_sess_active_str,
+				  sizeof(cur_sess_active_str)));
+		}
+		/* Always return to init if dead */
 		return_to_init_state(vpn);
 	}
 	return !vpn->peer_died;
@@ -1807,7 +1810,7 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 {
 	struct timespec	now;
 	time_t		inactive_secs, cur_key_age;
-	bool		peer_init_retransmit;
+	bool		peer_init_retransmit = false;
 	char		inactive_secs_str[32];
 	struct sockaddr_in null_addr = {0};
 
@@ -1820,7 +1823,6 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 			case HOST_GW:
 				inactive_secs = now.tv_sec - vpn->sess_end_ts.tv_sec;
 				if (inactive_secs >= MAX_HOST_GW_INIT_SECS) {
-					peer_init_retransmit = false;
 					log_msg(LOG_NOTICE, "%s: stayed in %s for %s",
 						VPN_ROLE_STR(vpn->role),
 						VPN_STATE_STR(vpn->state),
