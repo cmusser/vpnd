@@ -2,6 +2,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <sys/types.h>
 #include <sys/event.h>
 #include <sys/uio.h>
@@ -40,6 +41,8 @@
 #define KEY_SWITCH_RETRANS_INTERVAL (500)
 #define KEY_READY_RETRANS_INTERVAL (500)
 
+#define SYS_IP_FORWARDING "net.inet.ip.forwarding"
+#define SYS_IP6_FORWARDING "net.inet6.ip6.forwarding"
 
 /* VPN process role */
 typedef enum {
@@ -169,6 +172,8 @@ struct vpn_state {
 	char		tun_name  [8];
 	char		nonce_filename[256];
 	char		resolvconf_path[256];
+	bool		already_ip_forwarding;
+	bool		already_ip6_forwarding;
 	uint32_t	peer_id;
 	struct vpn_peer_info tx_peer_info;
 	struct vpn_peer_info rx_peer_info;
@@ -223,12 +228,15 @@ bool		get_sockaddr(struct addrinfo **addrinfo_p, char *host, char *port_str, boo
 void		addr2net_with_netmask(sa_family_t af, void *host_addr, unsigned char *netmask);
 void		addr2net_with_prefix(sa_family_t af, void *host_addr, uint8_t prefix_len);
 sa_family_t	inet_pton_any(const char *restrict src, void *restrict dst);
+bool		get_sysctl_bool(char *name);
+void		set_sysctl_bool(char *name, bool value);
 void		spawn_subprocess(char *cmd);
 void		manage_resolver(struct vpn_state *vpn);
 void		manage_proxy_arp_for_host(struct vpn_state *vpn);
 void		manage_host_ptp_addrs(struct vpn_state *vpn);
 void		manage_host_gw_ptp_addrs(struct vpn_state *vpn);
 void		manage_route_to_host_gw_net(struct vpn_state *vpn);
+void		manage_forwarding(struct vpn_state *vpn);
 void		manage_network_config(struct vpn_state *vpn);
 bool		manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, socklen_t remote_addr_len);
 void		generate_peer_id(struct vpn_state *vpn);
@@ -482,6 +490,34 @@ inet_pton_any(const char *restrict src, void *restrict dst)
 	}
 
 	return af;
+}
+
+bool
+get_sysctl_bool(char *name)
+{
+	bool		flag_bool = false;
+	uint32_t	flag;
+	size_t		flag_sz = sizeof(flag);
+
+	if (sysctlbyname(name, &flag, &flag_sz, NULL, 0) == -1)
+		log_msg(LOG_ERR, "sysctl get %s: %s", name, strerror(errno));
+	else
+		flag_bool = (flag == 0) ? false : true;
+
+	return flag_bool;
+}
+
+void
+set_sysctl_bool(char *name, bool value)
+{
+	uint32_t	flag;
+
+	flag = (value == true) ? 1 : 0;
+
+	if (sysctlbyname(name, NULL, 0, &flag, sizeof(flag)) == -1)
+		log_msg(LOG_ERR, "sysctl set %s: %s", name, strerror(errno));
+	else
+		log_msg(LOG_NOTICE, "sysctl %s=%d", name, flag);
 }
 
 void
@@ -759,6 +795,28 @@ manage_route_to_host_gw_net(struct vpn_state *vpn)
 }
 
 void
+manage_forwarding(struct vpn_state *vpn)
+{
+	switch (vpn->state) {
+	case INIT:
+		if (!vpn->already_ip_forwarding)
+			set_sysctl_bool(SYS_IP_FORWARDING, false);
+		if (!vpn->already_ip6_forwarding)
+			set_sysctl_bool(SYS_IP6_FORWARDING, false);
+		break;
+	case ACTIVE_MASTER:
+	case ACTIVE_SLAVE:
+		set_sysctl_bool(SYS_IP_FORWARDING, true);
+		set_sysctl_bool(SYS_IP6_FORWARDING, true);
+		break;
+	default:
+		log_msg(LOG_ERR, "%s: cannot manage forwarding in %s state",
+			VPN_ROLE_STR(vpn->role), VPN_STATE_STR(vpn->state));
+	}
+
+}
+
+void
 manage_network_config(struct vpn_state *vpn)
 {
 	switch (vpn->role) {
@@ -782,13 +840,17 @@ bool
 manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, socklen_t remote_addr_len)
 {
 	bool		ok = true;
+	int		rv;
 	char		remote_addr_str[INET6_ADDRSTRLEN] = "<ADDR>";
 
 	format_sockaddr(remote_addr->sa_family, remote_addr,
 			remote_addr_str, sizeof(remote_addr_str));
 
-	if (connect(vpn->ext_sock, remote_addr, remote_addr_len) == 0) {
-		log_msg(LOG_NOTICE, "%s: connected to %s",
+	rv = connect(vpn->ext_sock, remote_addr, remote_addr_len);
+	if (rv == 0 || (rv == -1 &&
+	     ((struct sockaddr_in *)remote_addr)->sin_family == AF_UNSPEC &&
+			errno == EAFNOSUPPORT)) {
+		log_msg(LOG_NOTICE, "%s: setting peer to %s",
 			VPN_ROLE_STR(vpn->role), remote_addr_str);
 	} else {
 		ok = false;
@@ -877,6 +939,9 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 	char           *stats_path = "/var/run/vpnd_stats.sock";
 
 	bzero(vpn, sizeof(struct vpn_state));
+
+	vpn->already_ip_forwarding = get_sysctl_bool(SYS_IP_FORWARDING);
+	vpn->already_ip6_forwarding = get_sysctl_bool(SYS_IP6_FORWARDING);
 
 	config_file = fopen(config_fname, "r");
 	if (config_file != NULL) {
@@ -1823,11 +1888,13 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 			case HOST_GW:
 				inactive_secs = now.tv_sec - vpn->sess_end_ts.tv_sec;
 				if (inactive_secs >= MAX_HOST_GW_INIT_SECS) {
-					log_msg(LOG_NOTICE, "%s: stayed in %s for %s",
+					log_msg(LOG_NOTICE, "%s: returning to %s "
+						"after %s in %s",
 						VPN_ROLE_STR(vpn->role),
-						VPN_STATE_STR(vpn->state),
+						VPN_STATE_STR(HOST_WAIT),
 						time_str(inactive_secs, inactive_secs_str,
-						sizeof(inactive_secs_str)));
+						 sizeof(inactive_secs_str)),
+						VPN_STATE_STR(vpn->state));
 					null_addr.sin_family = AF_UNSPEC;
 					manage_ext_sock_connection(vpn,
 					      (struct sockaddr *)&null_addr,
@@ -2102,7 +2169,7 @@ main(int argc, char *argv[])
 			config_fname = optarg;
 			break;
 		default:
-			fprintf(stderr, "usage: vpnd [-fdcr]\n");
+			fprintf(stderr, "usage: vpnd [-vfc]\n");
 			fprintf(stderr, "  -f: foreground mode (default: daemon)\n");
 			fprintf(stderr, "  -v: verbosity (default: NOTICE; use once for\n");
 			fprintf(stderr, "      INFO, multiple times for DEBUG)\n");
