@@ -828,9 +828,12 @@ manage_network_config(struct vpn_state *vpn)
 			manage_resolver(vpn);
 		break;
 	case HOST_GW:
+		manage_forwarding(vpn);
 		manage_host_gw_ptp_addrs(vpn);
 		manage_proxy_arp_for_host(vpn);
 		break;
+	case NET_GW:
+		manage_forwarding(vpn);
 	default:
 		break;
 	}
