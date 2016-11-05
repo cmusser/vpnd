@@ -7,14 +7,15 @@ This describes the protocol used by vpnd peers
 The goal of the network protocol is to securely transmit data between
 the two peers, changing the encryption keys used on a regular basis
 and retransmitting protocol (meaning non-data) messages if the peer
-acknowledgement is not received.
+acknowledgement is not received. UDP is used, meaning that retransmission
+of the data packets is up to the higher layer protocols being transported
 
 ## Roles
 
-`vpnd` supports two uses cases: a pair of network gateways providing
-access to hosts on the peer's internal network and a "client/server"
-pair where one peer provides access to its private network to a single
-host.
+`vpnd` supports two uses cases. The first is a pair of network gateways
+providing access to hosts on the peer's internal network. The second is
+a "client/server" pair in which one peer provides access to its internal
+network to a single host.
 
 In the first use case, both peers use the `net-gw` role. In the second,
 the client assumes the `host` role and the server (the access provider)
@@ -23,10 +24,11 @@ assumes the `host-gw` role.
 ## Key Master/Slave
 
 At the outset of communication, `vpnd` peers choose one peer to be the
-initiator of periodic key changes. The states that begin with
+initiator of periodic key changes. The protocol states that begin with
 `MASTER_` or `SLAVE_` denote this particular attribute. Either peer
-can assume the role of initiator: it's based on the peers exchanging
-random numbers and comparing which is largest.
+can be initiator; it is not based on the role. The decision is based on
+the peers exchanging random numbers and comparing them to see which is
+largest.
 
 ## Protocol operation
 
@@ -38,7 +40,7 @@ random numbers and comparing which is largest.
 2. If a `vpnd` is configured as a HOST_GW, i.e. servicing a specific
    client, its initial state is `HOST_WAIT`. It passively listens for
    the initial `PEER_INFO` message from the peer. It gets the peer's
-   address from the received datagram and changes to the INIT state
+   address from the received datagram and changes to the `INIT` state.
 
 3. For all other roles, the initial state is `INIT`. `vpnd` transmits
    a `PEER_INFO` message containing the random number generated
@@ -91,8 +93,4 @@ original shared key (derived from the key data in the configuration)
 is restored.
 
 When running in the `host-gw` role, a period of inactivity spent in
-the `INIT` state causes a change to the `HOST_WAIT` state.
-
-
-
-
+the `INIT` state causes a change back to the `HOST_WAIT` state.

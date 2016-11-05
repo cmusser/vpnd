@@ -1,5 +1,5 @@
 # vpnd
-tun-based VPN
+tun-based VPN for DragonFlyBSD
 
 ## Overview
 
@@ -7,25 +7,24 @@ tun-based VPN
 allowing the creation of secure network topologies.
 
 `vpnd` is designed to be simple and, as a result, secure. It requires
-little configuration. It was inspired by other, similar projects,
+little configuration. `vpnd` was inspired by other, similar projects,
 principally QuickTUN, whose author helpfully gave some advice on
 network configuration while this project was still in the planning
 stage.
 
 ## Features
 
-- Uses cryptographic primitives from the well-regarded NaCl library.
+- Uses NaCl cryptographic primitives. provided by the `libsodium` library.
 
-- No reduced security modes: no options for unencrypted transport or
-  unchanging nonces.
+- No reduced security modes, such as unencrypted transport or unchanging nonces.
 
 - Frequently-changing encryption keys increase the difficulty of
   decrypting recorded flows in the future, even if the initial private
   keys are compromised. This is known as "forward secrecy".
 
-- BSD only at the moment. Linux could be supported by replacing the
-  event handling code (based on `kqueue`) with `epoll` and the
-  `timerfd_*` and `signalfd` family of functions.
+- DragonFlyBSD-only at the moment. Support for the other BSDs still needs
+  some minor porting work and Linux is possible as well. The status of porting
+  is described below.
 
 - Layer 3 transport. Saves bandwidth and prevents broadcast traffic
   from traversing the link.
@@ -44,9 +43,9 @@ stage.
 
 ## Requirements
 
-1. FreeBSD or DragonFlyBSD (might work on the other BSDs too).
+1. DragonFlyBSD
 2. libsodium >= 1.0.7
-
+3. The `resolvconf` utility.
 
 ## Modes of Operation
 
@@ -207,6 +206,15 @@ or
 
 `socat - UNIX-CONNECT:/var/run/vpnd_stats.sock`
 
+## Operating System Compatibility
+|Operating System|Notes|
+|---|---|
+|DragonFlyBSD|Works in all modes.|
+|Mac OS X|Doesn't compile currently and needs the 3rd-party `tun(4)` KEXT. Some compatibility functions are needed for `clock_gettime(2)` and `strtonum(3)`.|
+|FreeBSD|Compiles and runs as a `net-gw` and maybe `host`. `host-gw` does not work due to differences in the way the `arp(8)` command works for proxy ARP. This is under investigation.|
+|OpenBSD|Doesn't compile: some function signatures are rejected, different `#include`s are needed, some `tun(4)` related `#define`s are different (or not present).|
+|NetBSD|unknown (not tried yet)|
+|Linux|Could be supported by replacing the event handling code (based on `kqueue`) with `epoll` and the `timerfd_*` and `signalfd` family of functions. A prerequisite is reorganizing the code into OS-specific and non-specific modules.|
 
 ## Protocol Details
 

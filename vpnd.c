@@ -634,9 +634,8 @@ manage_proxy_arp_for_host(struct vpn_state *vpn)
 	if (inet_ntop(vpn->tx_peer_info.host_addr_family, &vpn->tx_peer_info.host_addr,
 		      host_addr_str, sizeof(host_addr_str)) == NULL) {
 		ok = false;
-		log_msg(LOG_ERR, "couldn't format address (AF %u) for managing "
-			" proxy ARP: %s", vpn->tx_peer_info.host_addr_family,
-			strerror(errno));
+		log_msg(LOG_WARNING, "%s: client host address (for proxy ARP) "
+			"unconfigured or invalid", VPN_ROLE_STR(vpn->role));
 	}
 	if (ok) {
 		switch (vpn->state) {
@@ -688,9 +687,8 @@ manage_host_ptp_addrs(struct vpn_state *vpn)
 
 	if (inet_ntop(vpn->rx_peer_info.host_addr_family, &vpn->rx_peer_info.host_addr,
 		      host_addr_str, sizeof(host_addr_str)) == NULL) {
-		log_msg(LOG_ERR, "couldn't format address (AF %u) for ifconfig of "
-		      "host tunnel: %s", vpn->rx_peer_info.host_addr_family,
-			strerror(errno));
+		log_msg(LOG_WARNING, "%s: host address on remote network unconfigured "
+			"or invalid", VPN_ROLE_STR(vpn->role));
 	} else {
 		switch (vpn->state) {
 		case INIT:
@@ -724,9 +722,8 @@ manage_host_gw_ptp_addrs(struct vpn_state *vpn)
 
 	if (inet_ntop(vpn->tx_peer_info.host_addr_family, &vpn->tx_peer_info.host_addr,
 		      host_addr_str, sizeof(host_addr_str)) == NULL) {
-		log_msg(LOG_ERR, "couldn't format address (AF %u) for ifconfig "
-			"of host gw tunnel: %s",
-			vpn->tx_peer_info.host_addr_family, strerror(errno));
+		log_msg(LOG_WARNING, "%s: client host address unconfigured or invalid",
+			VPN_ROLE_STR(vpn->role));
 	} else {
 		switch (vpn->state) {
 		case INIT:
@@ -767,9 +764,8 @@ manage_route_to_host_gw_net(struct vpn_state *vpn)
 
 	if (inet_ntop(vpn->rx_peer_info.host_addr_family, net_addr, net_addr_str,
 		      sizeof(net_addr_str)) == NULL) {
-		log_msg(LOG_ERR, "couldn't format address (AF %u) for adding route "
-			" to host gw net: %s",
-			vpn->rx_peer_info.host_addr_family, strerror(errno));
+		log_msg(LOG_WARNING, "%s: remote network address unconfigured or invalid",
+			VPN_ROLE_STR(vpn->role));
 	} else {
 		switch (vpn->state) {
 		case INIT:
@@ -813,7 +809,6 @@ manage_forwarding(struct vpn_state *vpn)
 		log_msg(LOG_ERR, "%s: cannot manage forwarding in %s state",
 			VPN_ROLE_STR(vpn->role), VPN_STATE_STR(vpn->state));
 	}
-
 }
 
 void
@@ -1721,6 +1716,12 @@ ext_sock_input(struct vpn_state *vpn)
 	/* TODO: don't assume data is read completely */
 	if ((rx_len = recvmsg(vpn->ext_sock, &msghdr, 0)) == -1) {
 		ok = false;
+		/*
+		 * Ignore ECONNREFUSED because it's expected when sending on
+		 * a connected socket and the peer is not available. The
+		 * other host responds with an ICMP "port unreachable" that
+		 * doesn't warrant an error message.
+		 */
 		if (errno != ECONNREFUSED)
 			log_msg(LOG_ERR, "%s: recvmsg failed from tunnel socket -- %s (%d)",
 			 VPN_STATE_STR(vpn->state), strerror(errno), errno);
