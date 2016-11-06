@@ -1699,12 +1699,15 @@ ext_sock_input(struct vpn_state *vpn)
 
 	ok = true;
 
-	/*
-	 * TODO: this stuff gets initialized the same way everytime through.
-	 * Refactor into the VPN session state and do it once?
-	 */
-	msghdr.msg_name = (vpn->role == HOST_GW && vpn->state == HOST_WAIT) ? &peer_addr : NULL;
-	msghdr.msg_namelen = sizeof(peer_addr);
+	if (vpn->role == HOST_GW && vpn->state == HOST_WAIT) {
+		/* Unconnected socket, peer address will be available. */
+		msghdr.msg_name = &peer_addr;
+		msghdr.msg_namelen = sizeof(peer_addr);
+	} else {
+		/* Connected, peer address unavailable and not needed. */
+		msghdr.msg_name = NULL;
+		msghdr.msg_namelen = 0;
+	}
 	msghdr.msg_iov = rx_iovec;
 	msghdr.msg_iovlen = COUNT_OF(rx_iovec);
 
@@ -1713,7 +1716,6 @@ ext_sock_input(struct vpn_state *vpn)
 	rx_iovec[1].iov_base = ciphertext;
 	rx_iovec[1].iov_len = sizeof(ciphertext);
 
-	/* TODO: don't assume data is read completely */
 	if ((rx_len = recvmsg(vpn->ext_sock, &msghdr, 0)) == -1) {
 		ok = false;
 		/*
