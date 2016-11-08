@@ -223,7 +223,7 @@ char           *time_str(time_t time, char *time_str, size_t len);
 char           *get_value(char *line, size_t len);
 bool		read_nonce_reset_point(struct vpn_state *vpn, unsigned char *nonce);
 void		write_nonce_reset_point(struct vpn_state *vpn);
-char           *format_sockaddr(sa_family_t af, struct sockaddr *sa, char *str, size_t str_sz);
+char           *format_sockaddr(struct sockaddr *sa, char *str, size_t str_sz);
 bool		get_sockaddr(struct addrinfo **addrinfo_p, char *host, char *port_str, bool passive);
 void		addr2net_with_netmask(sa_family_t af, void *host_addr, unsigned char *netmask);
 void		addr2net_with_prefix(sa_family_t af, void *host_addr, uint8_t prefix_len);
@@ -390,28 +390,28 @@ write_nonce_reset_point(struct vpn_state *vpn)
 }
 
 char           *
-format_sockaddr(sa_family_t af, struct sockaddr *sa, char *str, size_t str_sz)
+format_sockaddr(struct sockaddr *sa, char *str, size_t str_sz)
 {
 	char		addr_str  [INET6_ADDRSTRLEN];
 
-	switch (af) {
+	switch (sa->sa_family) {
 	case AF_UNSPEC:
 		strlcpy(str, "NULL address", str_sz);
 		break;
 	case AF_INET:
-		inet_ntop(af, &((struct sockaddr_in *)sa)->sin_addr,
+		inet_ntop(sa->sa_family, &((struct sockaddr_in *)sa)->sin_addr,
 			  addr_str, sizeof(addr_str));
 		snprintf(str, str_sz, "%s:%u", addr_str,
 			 ntohs(((struct sockaddr_in *)sa)->sin_port));
 		break;
 	case AF_INET6:
-		inet_ntop(af, &((struct sockaddr_in6 *)sa)->sin6_addr,
+		inet_ntop(sa->sa_family, &((struct sockaddr_in6 *)sa)->sin6_addr,
 			  addr_str, sizeof(addr_str));
 		snprintf(str, str_sz, "%s:%u", addr_str,
 			 ntohs(((struct sockaddr_in6 *)sa)->sin6_port));
 		break;
 	default:
-		snprintf(str, str_sz, "invalid address (family: %d)", af);
+		snprintf(str, str_sz, "invalid address (family: %d)", sa->sa_family);
 	}
 
 	return str;
@@ -841,8 +841,7 @@ manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, 
 	int		rv;
 	char		remote_addr_str[INET6_ADDRSTRLEN] = "<ADDR>";
 
-	format_sockaddr(remote_addr->sa_family, remote_addr,
-			remote_addr_str, sizeof(remote_addr_str));
+	format_sockaddr(remote_addr, remote_addr_str, sizeof(remote_addr_str));
 
 	rv = connect(vpn->ext_sock, remote_addr, remote_addr_len);
 	if (rv == 0 || (rv == -1 &&
@@ -1207,8 +1206,7 @@ init(bool fflag, char *config_fname, struct vpn_state *vpn)
 				ok = false;
 				close(vpn->ext_sock);
 				log_msg(LOG_ERR, "couldn't bind to %s: %s",
-				  format_sockaddr(local_addrinfo->ai_family,
-						  local_addrinfo->ai_addr,
+				    format_sockaddr(local_addrinfo->ai_addr,
 					    local_info, sizeof(local_info)),
 					strerror(errno));
 			}
