@@ -22,9 +22,9 @@ stage.
   decrypting recorded flows in the future, even if the initial private
   keys are compromised. This is known as "forward secrecy".
 
-- DragonFlyBSD-only at the moment. Support for the other BSDs still needs
-  some minor porting work and Linux is possible as well. The status of porting
-  is described below.
+- DragonFlyBSD-only at the moment. Full support for the other BSDs still
+  needs varying degrees of work. Linux is possible as well. The status of
+  porting is described below.
 
 - Layer 3 transport. Saves bandwidth and prevents broadcast traffic
   from traversing the link.
@@ -40,12 +40,11 @@ stage.
 	  private networks together via a secure link. This connects
 	  all the hosts in two sites together.
 
-
 ## Requirements
 
 1. DragonFlyBSD
 2. libsodium >= 1.0.7
-3. The `resolvconf` utility.
+3. The `resolvconf` utility (only needed for HOST role)
 
 ## Modes of Operation
 
@@ -96,8 +95,9 @@ default) contains one parameter per line, in the following format:
 `param_name: value`
 
 ### Key Generation
-1. Use the `keypair` program to create a public/private keypair and
-   the resulting public key to the operator of the peer system
+1. Use the `keypair` program (included with the distribution)
+   to create a public/private keypair and give the resulting public key
+   to the operator of the peer system.
 2. Get the peer's public key.
 3. In the configuration file, specify the following parameters:
 		- `local_sk` the locally generate secret key.
@@ -180,7 +180,6 @@ remote_pk: <client host public key>
 role: host-gw
 client_addr: 192.168.1.66/24
 ```
-
 ##### Host configuration
 
 ```
@@ -210,11 +209,10 @@ or
 |Operating System|Notes|
 |---|---|
 |DragonFlyBSD|Works in all modes.|
-|Mac OS X|Doesn't compile currently and needs the 3rd-party `tun(4)` KEXT. Some compatibility functions are needed for `clock_gettime(2)` and `strtonum(3)`.|
 |FreeBSD|Compiles and runs as a `net-gw` and maybe `host`. `host-gw` does not work due to differences in the way the `arp(8)` command works for proxy ARP. This is under investigation.|
-|OpenBSD|Doesn't compile: some function signatures are rejected, different `#include`s are needed, some `tun(4)` related `#define`s are different (or not present).|
-|NetBSD|unknown (not tried yet)|
-|Linux|Could be supported by replacing the event handling code (based on `kqueue`) with `epoll` and the `timerfd_*` and `signalfd` family of functions. A prerequisite is reorganizing the code into OS-specific and non-specific modules.|
+|NetBSD|same as above: `host-gw` mode needs work due to difficulties with proxy ARP.|
+|Linux|Porting not started. The event handling code (based on `kqueue`) would need to be replaced with `epoll` and the `timerfd_*` and `signalfd` family of functions. The commands used to configure networking would also need modification.|
+|Mac OS X|Doesn't compile currently. Needs the 3rd-party `tun(4)` KEXT. A compatibility function is needed for `clock_gettime(2)`.|
 
 ## Protocol Details
 
