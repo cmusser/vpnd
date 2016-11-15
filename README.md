@@ -121,6 +121,7 @@ default) contains one parameter per line, in the following format:
 |local_port|local UDP port to listen on|no, defaults to 1337.|
 |remote_pk|The peer's public key|yes, use values from `keypair` program|
 |remote_host|hostname or IP address of remote peer.|yes, in `host` and `net-gw` role.|
+|remote_network|The address of the remote network.|yes, in `net-gw` role. Specified in CIDR notation, ie 192.168.1.0/24|
 |host_addr|In `host-gw` mode, the address to assign to the client and the prefix length of the associated network|yes, in `host-gw` role. Specified in CIDR notation, ie 192.168.1.1/24|
 |resolv_addr|In `host-gw` mode, the address of the DNS resolver to be used by the client|no|
 |resolv_domain|In `host-gw` mode, the DNS search domain to be used by the client|no|
@@ -209,8 +210,8 @@ or
 |Operating System|Notes|
 |---|---|
 |DragonFlyBSD|Works in all modes.|
-|FreeBSD|Compiles and runs as a `net-gw` and maybe `host`. `host-gw` does not work due to differences in the way the `arp(8)` command works for proxy ARP. This is under investigation.|
-|NetBSD|same as above: `host-gw` mode needs work due to difficulties with proxy ARP.|
+|FreeBSD|Compiles and runs as a `net-gw` and maybe `host`. `host-gw` does not work due to differences in the way the `arp(8)` command works for proxy ARP.|
+|NetBSD|`host-gw` mode doesn't work: proxy ARP needs a slightly different command (the `proxy` keyword and there are problems routing packets toward the tunnel. `net-gw` needs to `ifconfig` the tunnel with a local address and invoke `route` with the `-link` keyword.|
 |Linux|Porting not started. The event handling code (based on `kqueue`) would need to be replaced with `epoll` and the `timerfd_*` and `signalfd` family of functions. The commands used to configure networking would also need modification.|
 |Mac OS X|Doesn't compile currently. Needs the 3rd-party `tun(4)` KEXT. A compatibility function is needed for `clock_gettime(2)`.|
 

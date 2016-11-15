@@ -92,7 +92,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 	char		remote_pk_hex[(crypto_box_PUBLICKEYBYTES * 2) + 1] = {'\0'};
 	char		remote_host[INET6_ADDRSTRLEN] = {'\0'};
 	char		remote_port[6] = {'\0'};
-	char		host_addr [INET6_ADDRSTRLEN] = {'\0'};
+	char		host_addr [INET6_ADDRSTRLEN + 4] = {'\0'};
+	char		remote_network[INET6_ADDRSTRLEN + 4] = {'\0'};
 	char		resolv_addr[INET6_ADDRSTRLEN] = {'\0'};
 	char		resolv_domain[32] = {'\0'};
 	char		max_key_age_secs[16] = {'\0'};
@@ -118,6 +119,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		remote_port, sizeof(remote_port), "1337"},
 		{"host address", "host_addr:", sizeof("host_addr:"),
 		host_addr, sizeof(host_addr), NULL},
+		{"remote network", "remote_network:", sizeof("remote_network:"),
+		remote_network, sizeof(remote_network), NULL},
 		{"resolver address", "resolv_addr:", sizeof("resolv_addr:"),
 		resolv_addr, sizeof(resolv_addr), NULL},
 		{"resolver domain", "resolv_domain:", sizeof("resolv_domain:"),
@@ -203,6 +206,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		 * 
 		 * host_addr: require in host gateway role.
 		 * 
+		 * remote_network: require in net gateway role.
+		 * 
 		 * stats_prefix: let the default be the hostname, which must be
 		 * computed and hence cannot be hardcoded into the array of
 		 * config parameters
@@ -213,6 +218,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				if (c[i].default_value == NULL) {
 					if (!(strcmp(c[i].name, "remote_host:") == 0 ||
 					      strcmp(c[i].name, "host_addr:") == 0 ||
+					      strcmp(c[i].name, "remote_network:") == 0 ||
 					      strcmp(c[i].name, "resolv_addr:") == 0 ||
 					      strcmp(c[i].name, "resolv_domain:") == 0)) {
 						ok = false;
@@ -237,6 +243,38 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 
 		if (strcmp(role, "net-gw") == 0) {
 			vpn->role = NET_GW;
+			if (strlen(remote_network) == 0) {
+				ok = false;
+				log_msg(vpn, LOG_ERR, "remote network must be "
+					"specified when in \"%s\" role", VPN_ROLE_STR(vpn->role));
+			}
+			if (ok) {
+				if ((prefix_start = strchr(remote_network, '/')) != NULL) {
+					*prefix_start = '\0';
+					prefix_start++;
+				} else {
+					ok = false;
+					log_msg(vpn, LOG_ERR, "can't find prefix in "
+						"remote network");
+				}
+			}
+			if (ok) {
+				printf("remote_network: %s\n", remote_network);
+				vpn->remote_network_family = inet_pton_any(vpn, remote_network,
+						      &vpn->remote_network);
+				if (vpn->remote_network_family == AF_UNSPEC)
+					ok = false;
+			}
+			if (ok) {
+				max_prefix_len = (vpn->remote_network_family == AF_INET)
+					? 32 : 128;
+				vpn->remote_network_prefix_len = strtonum(prefix_start,
+						0, max_prefix_len, &errstr);
+				if (errstr) {
+					ok = false;
+					log_msg(vpn, LOG_ERR, "remote network prefix length too %s", errstr);
+				}
+			}
 		} else if (strcmp(role, "host-gw") == 0) {
 			vpn->role = HOST_GW;
 			if (strlen(host_addr) == 0) {
@@ -267,7 +305,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 						0, max_prefix_len, &errstr);
 				if (errstr) {
 					ok = false;
-					log_msg(vpn, LOG_ERR, "prefix length too %s", errstr);
+					log_msg(vpn, LOG_ERR, "host address prefix length too %s", errstr);
 				}
 			}
 			if (ok) {

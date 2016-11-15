@@ -26,6 +26,8 @@ void		manage_proxy_arp_for_host(struct vpn_state *vpn);
 void		manage_host_ptp_addrs(struct vpn_state *vpn);
 void		manage_host_gw_ptp_addrs(struct vpn_state *vpn);
 void		manage_route_to_host_gw_net(struct vpn_state *vpn);
+void		manage_net_gw_tun_intf(struct vpn_state *vpn);
+void		manage_net_gw_remote_route(struct vpn_state *vpn);
 void		manage_forwarding(struct vpn_state *vpn);
 void		manage_network_config(struct vpn_state *vpn);
 bool		manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, socklen_t remote_addr_len);

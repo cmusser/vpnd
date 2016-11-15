@@ -151,6 +151,9 @@ struct vpn_state {
 	bool		already_ip_forwarding;
 	bool		already_ip6_forwarding;
 	uint32_t	peer_id;
+	sa_family_t	remote_network_family;
+	uint8_t		remote_network_prefix_len;
+	unsigned char	remote_network[sizeof(struct in6_addr)];
 	struct vpn_peer_info tx_peer_info;
 	struct vpn_peer_info rx_peer_info;
 	char		stats_prefix[64];

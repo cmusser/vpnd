@@ -482,6 +482,67 @@ manage_route_to_host_gw_net(struct vpn_state *vpn)
 }
 
 void
+manage_net_gw_tun_intf(struct vpn_state *vpn)
+{
+	char           *action_str = "\0";
+	char		cmd       [256] = {'\0'};
+
+	switch (vpn->state) {
+	case INIT:
+		action_str = "down";
+		break;
+	case ACTIVE_MASTER:
+	case ACTIVE_SLAVE:
+		action_str = "up";
+		break;
+	default:
+		log_msg(vpn, LOG_ERR, "cannot manage %s tunnel interface "
+			"in %s state", VPN_ROLE_STR(vpn->role),
+			VPN_STATE_STR(vpn->state));
+	}
+	if (strlen(action_str) > 0) {
+		snprintf(cmd, sizeof(cmd), "ifconfig %s %s", vpn->tun_name, action_str);
+		log_msg(vpn, LOG_NOTICE, "%s: %s", VPN_ROLE_STR(vpn->role), cmd);
+		spawn_subprocess(vpn, cmd);
+	}
+}
+
+void
+manage_net_gw_remote_route(struct vpn_state *vpn)
+{
+	char		remote_network_str[INET6_ADDRSTRLEN];
+	char           *action_str = "\0";
+	char		cmd       [256] = {'\0'};
+
+	if (inet_ntop(vpn->remote_network_family, vpn->remote_network, remote_network_str,
+		      sizeof(remote_network_str)) == NULL) {
+		log_msg(vpn, LOG_WARNING, "%s: remote network address unconfigured or invalid",
+			VPN_ROLE_STR(vpn->role));
+	} else {
+		switch (vpn->state) {
+		case INIT:
+			action_str = "delete";
+			break;
+		case ACTIVE_MASTER:
+		case ACTIVE_SLAVE:
+			action_str = "add";
+			break;
+		default:
+			log_msg(vpn, LOG_ERR, "cannot manage %s remote network route "
+				"in %s state", VPN_ROLE_STR(vpn->role),
+				VPN_STATE_STR(vpn->state));
+		}
+		if (strlen(action_str) > 0) {
+			snprintf(cmd, sizeof(cmd), "route %s %s/%u -interface %s",
+				 action_str, remote_network_str, vpn->remote_network_prefix_len,
+				 vpn->tun_name);
+			log_msg(vpn, LOG_NOTICE, "%s: %s", VPN_ROLE_STR(vpn->role), cmd);
+			spawn_subprocess(vpn, cmd);
+		}
+	}
+}
+
+void
 manage_forwarding(struct vpn_state *vpn)
 {
 	switch (vpn->state) {
@@ -520,6 +581,9 @@ manage_network_config(struct vpn_state *vpn)
 		break;
 	case NET_GW:
 		manage_forwarding(vpn);
+		manage_net_gw_tun_intf(vpn);
+		manage_net_gw_remote_route(vpn);
+
 	default:
 		break;
 	}
