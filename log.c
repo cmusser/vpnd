@@ -101,6 +101,7 @@ log_stats(struct vpn_state *vpn)
 	char		rp_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
 	char		rx_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
 	char		host_addr_str[INET6_ADDRSTRLEN];
+	char		remote_net_str[INET6_ADDRSTRLEN];
 	char		resolv_addr_str[INET6_ADDRSTRLEN];
 	char		peer_info_str[256] = {'\0'};
 
@@ -115,11 +116,15 @@ log_stats(struct vpn_state *vpn)
 		snprintf(peer_info_str, sizeof(peer_info_str),
 			 "\nRX peerinfo:\n"
 			 "  host: %s/%d\n"
+			 "  remote network: %s/%d\n"
 			 "  resolver: %s\n"
 			 "  domain: %s",
 			 string_for_addr(vpn->rx_peer_info.host_addr_family,
 				&vpn->rx_peer_info.host_addr, host_addr_str,
 		  sizeof(host_addr_str)), vpn->rx_peer_info.host_prefix_len,
+		   string_for_addr(vpn->rx_peer_info.remote_net_addr_family,
+			      &vpn->rx_peer_info.remote_net, remote_net_str,
+				   sizeof(remote_net_str)), vpn->rx_peer_info.remote_net_prefix_len,
 		       string_for_addr(vpn->rx_peer_info.resolv_addr_family,
 			    &vpn->rx_peer_info.resolv_addr, resolv_addr_str,
 				       sizeof(resolv_addr_str)),
@@ -130,11 +135,15 @@ log_stats(struct vpn_state *vpn)
 		snprintf(peer_info_str, sizeof(peer_info_str),
 			 "\nTX peerinfo:\n"
 			 "  host: %s/%d\n"
+			 "  local network: %s/%d\n"
 			 "  resolver: %s\n"
 			 "  domain: %s",
 			 string_for_addr(vpn->tx_peer_info.host_addr_family,
 				&vpn->tx_peer_info.host_addr, host_addr_str,
 		  sizeof(host_addr_str)), vpn->tx_peer_info.host_prefix_len,
+		   string_for_addr(vpn->tx_peer_info.remote_net_addr_family,
+			      &vpn->tx_peer_info.remote_net, remote_net_str,
+				   sizeof(remote_net_str)), vpn->tx_peer_info.remote_net_prefix_len,
 		       string_for_addr(vpn->tx_peer_info.resolv_addr_family,
 			    &vpn->tx_peer_info.resolv_addr, resolv_addr_str,
 				       sizeof(resolv_addr_str)),

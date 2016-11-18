@@ -1,5 +1,5 @@
 # vpnd
-tun-based VPN for DragonFlyBSD
+NaCl-based VPN for BSD systems
 
 ## Overview
 
@@ -22,8 +22,7 @@ stage.
   decrypting recorded flows in the future, even if the initial private
   keys are compromised. This is known as "forward secrecy".
 
-- DragonFlyBSD-only at the moment. Full support for the other BSDs still
-  needs varying degrees of work. Linux is possible as well. The status of
+- BSD-only at the moment, but a port to Linux is possible. The status of
   porting is described below.
 
 - Layer 3 transport. Saves bandwidth and prevents broadcast traffic
@@ -37,12 +36,12 @@ stage.
 	  network.
 
 	- A pair of hosts acting as security gateways that connect two
-	  private networks together via a secure link. This connects
+	  internal networks together via a secure link. This connects
 	  all the hosts in two sites together.
 
 ## Requirements
 
-1. DragonFlyBSD
+1. A BSD system. The primary focus is on {DragonFly,Free,Net}BSD
 2. libsodium >= 1.0.7
 3. The `resolvconf` utility (only needed for HOST role)
 
@@ -76,18 +75,12 @@ hosts and NATs. `vpnd` performs the various network stack configuration
 changes, making connections easy to establish. The gateway discovers
 the address of the client host by passively listening until the client
 actually begins communication. When the connection becomes active, the
-gateway host providess the client with an address on its local network
-and becomes an ARP proxy for that address. This arrangement allows
-any number of clients to participate on the remote network, each served
-by a dedicated `vpnd` process. The ARP proxy technique offers a couple
-of advantages. It eliminates the need to configure routes on any other
-routers on the host network: remote clients simply appear to be hosts 
-attached to the LAN. Because layer 2 is terminated at the VPN host,
-the connection need only pass layer 3. This reduces bandwidth and
-prevents broadcast traffic from traversing the link. It also simplifies
-the codebase, because only one type of tunnel (the `tun(4)`) needs to 
-be supported.
-
+gateway host provides the client with an address on a network dedicated
+to VPN clients, the network address of the internal network and DNS
+resolver information. This arrangement allows any number of clients to
+access the internal network, each served by a dedicated `vpnd` process.
+As in the network gateway setup, the VPN gateway becomes a layer 3 router
+forwarding packets between connected clients and the internal network.
 ## Configuration and Startup
 The configuration file (`vpnd.conf` in the current directory, by
 default) contains one parameter per line, in the following format:
@@ -122,6 +115,7 @@ default) contains one parameter per line, in the following format:
 |remote_pk|The peer's public key|yes, use values from `keypair` program|
 |remote_host|hostname or IP address of remote peer.|yes, in `host` and `net-gw` role.|
 |remote_network|The address of the remote network.|yes, in `net-gw` role. Specified in CIDR notation, ie 192.168.1.0/24|
+|local_network|The address of the local network.|yes, in `host-gw` role. Specified in CIDR notation, ie 192.168.1.0/24|
 |host_addr|In `host-gw` mode, the address to assign to the client and the prefix length of the associated network|yes, in `host-gw` role. Specified in CIDR notation, ie 192.168.1.1/24|
 |resolv_addr|In `host-gw` mode, the address of the DNS resolver to be used by the client|no|
 |resolv_domain|In `host-gw` mode, the DNS search domain to be used by the client|no|
@@ -135,8 +129,8 @@ default) contains one parameter per line, in the following format:
 
 #### Network Gateways
 
-In this example, private network #1 is 172.16.0.0/16 and the VPN gateway's
-address on this network is 172.16.0.2. Private network #2 is 10.1.0.0/16
+In this example, internal network #1 is 172.16.0.0/16 and the VPN gateway's
+address on this network is 172.16.0.2. Internal network #2 is 10.1.0.0/16
 and the VPN gateway's address on this network is 10.1.0.2. We assume that
 both networks have another host that acts as the default router.
 
@@ -148,8 +142,8 @@ remote_pk: <gateway #2 public key>
 role: net-gw
 remote_host: vpn-gw.network-2.com
 ```
-Private network #1's default router needs to be configured with a route
-to private network #2, via its local VPN gateway:
+Internal network #1's default router needs to be configured with a route
+to internal network #2, via its local VPN gateway:
 
 `route add 10.1.0.0/16 172.16.0.2`
 
@@ -161,17 +155,19 @@ remote_pk: <gateway #1 public key>
 role: net-gw
 remote_host: vpn--gw.network-1.com
 ```
-Similar to the above, private network #2's default router needs to
-be configured with a route to private network #1, via its local VPN
+Similar to the above, internal network #2's default router needs to
+be configured with a route to internal network #1, via its local VPN
 gateway:
 
 `route add 172.16.0.0/16 10.1.0.2`
 
 #### Host/Host Gateway
 
-In this example the host gateway's network is 192.168.1.0/24. The client host
-can be anywhere. On the host gateway, the `vpnd` can be simply started beforehand
-in the background.
+In this example the host gateway's network is 192.168.1.0/24 and its
+address is 192.168.1.2. 192.168.30.0/24 is a network block dedicated
+to VPN clients. On the host gateway, the `vpnd` can be started beforehand
+in the background. The client can be located on any network; it's location
+need not be known beforehand.
 
 ##### Host Gateway config:
 
@@ -179,8 +175,16 @@ in the background.
 local_sk: <host gateway secret key>
 remote_pk: <client host public key>
 role: host-gw
-client_addr: 192.168.1.66/24
+client_addr: 192.168.30.66/24
+local_network: 192.168.2.0/24
+resolv_addr: 192.168.1.2
+resolv_domain: my-internal-domain
 ```
+Similar to the network gateway case, the internal network's default
+router needs to route to the VPN client network via the VPN gateway:
+
+`route add 192.168.30.0/24 192.168.1.2`
+
 ##### Host configuration
 
 ```
@@ -189,8 +193,8 @@ remote_pk: <host gateway public key>
 role: host
 remote_host: vpn-host-gw.some-domain.com
 ```
-No route establishment, interface configuration or ARP table commands need 
-to be manually issued. `vpnd` will perform the necessary configuration.
+No route establishment or interface configuration commands need to be manually
+issued. `vpnd` will perform the necessary configuration.
 
 ## Statistics and Diagnostics
 
@@ -210,8 +214,8 @@ or
 |Operating System|Notes|
 |---|---|
 |DragonFlyBSD|Works in all modes.|
-|FreeBSD|Compiles and runs as a `net-gw` and maybe `host`. `host-gw` does not work due to differences in the way the `arp(8)` command works for proxy ARP.|
-|NetBSD|`host-gw` mode doesn't work: proxy ARP needs a slightly different command (the `proxy` keyword and there are problems routing packets toward the tunnel. `net-gw` needs to `ifconfig` the tunnel with a local address and invoke `route` with the `-link` keyword.|
+|FreeBSD|Not tested|
+|NetBSD|Works in `host-gw` and `net-gw` modes. `host` mode untested|
 |Linux|Porting not started. The event handling code (based on `kqueue`) would need to be replaced with `epoll` and the `timerfd_*` and `signalfd` family of functions. The commands used to configure networking would also need modification.|
 |Mac OS X|Doesn't compile currently. Needs the 3rd-party `tun(4)` KEXT. A compatibility function is needed for `clock_gettime(2)`.|
 

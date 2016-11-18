@@ -94,6 +94,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 	char		remote_port[6] = {'\0'};
 	char		host_addr [INET6_ADDRSTRLEN + 4] = {'\0'};
 	char		remote_network[INET6_ADDRSTRLEN + 4] = {'\0'};
+	char		local_network[INET6_ADDRSTRLEN + 4] = {'\0'};
 	char		resolv_addr[INET6_ADDRSTRLEN] = {'\0'};
 	char		resolv_domain[32] = {'\0'};
 	char		max_key_age_secs[16] = {'\0'};
@@ -121,6 +122,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		host_addr, sizeof(host_addr), NULL},
 		{"remote network", "remote_network:", sizeof("remote_network:"),
 		remote_network, sizeof(remote_network), NULL},
+		{"local network", "local_network:", sizeof("local_network:"),
+		local_network, sizeof(local_network), NULL},
 		{"resolver address", "resolv_addr:", sizeof("resolv_addr:"),
 		resolv_addr, sizeof(resolv_addr), NULL},
 		{"resolver domain", "resolv_domain:", sizeof("resolv_domain:"),
@@ -206,6 +209,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		 * 
 		 * host_addr: require in host gateway role.
 		 * 
+		 * local_network: require in host gateway role.
+		 * 
 		 * remote_network: require in net gateway role.
 		 * 
 		 * stats_prefix: let the default be the hostname, which must be
@@ -219,6 +224,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 					if (!(strcmp(c[i].name, "remote_host:") == 0 ||
 					      strcmp(c[i].name, "host_addr:") == 0 ||
 					      strcmp(c[i].name, "remote_network:") == 0 ||
+					      strcmp(c[i].name, "local_network:") == 0 ||
 					      strcmp(c[i].name, "resolv_addr:") == 0 ||
 					      strcmp(c[i].name, "resolv_domain:") == 0)) {
 						ok = false;
@@ -306,6 +312,37 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				if (errstr) {
 					ok = false;
 					log_msg(vpn, LOG_ERR, "host address prefix length too %s", errstr);
+				}
+			}
+			if (strlen(local_network) == 0) {
+				ok = false;
+				log_msg(vpn, LOG_ERR, "local network must be "
+					"specified when in \"%s\" role", VPN_ROLE_STR(vpn->role));
+			}
+			if (ok) {
+				if ((prefix_start = strchr(local_network, '/')) != NULL) {
+					*prefix_start = '\0';
+					prefix_start++;
+				} else {
+					ok = false;
+					log_msg(vpn, LOG_ERR, "can't find prefix in "
+						"local network");
+				}
+			}
+			if (ok) {
+				vpn->tx_peer_info.remote_net_addr_family = inet_pton_any(vpn,
+											 local_network, &vpn->tx_peer_info.remote_net);
+				if (vpn->tx_peer_info.host_addr_family == AF_UNSPEC)
+					ok = false;
+			}
+			if (ok) {
+				max_prefix_len = (vpn->tx_peer_info.remote_net_addr_family == AF_INET)
+					? 32 : 128;
+				vpn->tx_peer_info.remote_net_prefix_len = strtonum(prefix_start,
+						0, max_prefix_len, &errstr);
+				if (errstr) {
+					ok = false;
+					log_msg(vpn, LOG_ERR, "remote network prefix length too %s", errstr);
 				}
 			}
 			if (ok) {
