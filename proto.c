@@ -32,6 +32,12 @@
 #define KEY_SWITCH_RETRANS_INTERVAL (500)
 #define KEY_READY_RETRANS_INTERVAL (500)
 
+typedef enum {
+	MASTER,
+	SLAVE,
+	TIE,
+}		vpn_key_role;
+
 struct config_param {
 	char           *desc;
 	char           *name;
@@ -43,6 +49,7 @@ struct config_param {
 
 char           *get_value(char *line, size_t len);
 void		generate_peer_id(struct vpn_state *vpn);
+vpn_key_role	peer_id_compare(struct vpn_state *vpn);
 
 char           *
 get_value(char *line, size_t len)
@@ -76,6 +83,27 @@ generate_peer_id(struct vpn_state *vpn)
 {
 	randombytes_buf(&vpn->peer_id, sizeof(vpn->peer_id));
 	vpn->tx_peer_info.peer_id = htonl(vpn->peer_id);
+}
+
+vpn_key_role
+peer_id_compare(struct vpn_state *vpn)
+{
+	uint32_t	hostorder_remote_peer_id;
+
+	hostorder_remote_peer_id = ntohl(vpn->rx_peer_info.peer_id);
+	if (hostorder_remote_peer_id > vpn->peer_id) {
+		log_msg(vpn, LOG_NOTICE, "%s: will be key master", VPN_ROLE_STR(vpn->role));
+		return MASTER;
+		change_state(vpn, MASTER_KEY_STALE);
+	} else if (hostorder_remote_peer_id < vpn->peer_id) {
+		log_msg(vpn, LOG_NOTICE, "%s: will be key slave", VPN_ROLE_STR(vpn->role));
+		return SLAVE;
+	} else {
+		log_msg(vpn, LOG_NOTICE, "%s: got same peer ID from remote, trying again.",
+			VPN_ROLE_STR(vpn->role));
+		return TIE;
+	}
+
 }
 
 bool
@@ -813,27 +841,37 @@ tx_key_ready(struct vpn_state *vpn)
 void
 process_peer_info(struct vpn_state *vpn, struct vpn_msg *msg, struct sockaddr *peer_addr, socklen_t peer_addr_len)
 {
-	uint32_t	hostorder_remote_peer_id;
-
 	memcpy(&vpn->rx_peer_info, msg->data, sizeof(vpn->rx_peer_info));
 
 	switch (vpn->state) {
 	case HOST_WAIT:
 		manage_ext_sock_connection(vpn, peer_addr, peer_addr_len);
-		change_state(vpn, INIT);
+		switch (peer_id_compare(vpn)) {
+		case MASTER:
+			change_state(vpn, MASTER_KEY_STALE);
+			break;
+		case SLAVE:
+			change_state(vpn, INIT);
+			break;
+		case TIE:
+			generate_peer_id(vpn);
+			change_state(vpn, INIT);
+			break;
+		}
+
 		break;
 	case INIT:
-		hostorder_remote_peer_id = ntohl(vpn->rx_peer_info.peer_id);
-		if (hostorder_remote_peer_id > vpn->peer_id) {
-			log_msg(vpn, LOG_DEBUG, "will be key master");
+		switch (peer_id_compare(vpn)) {
+		case MASTER:
 			change_state(vpn, MASTER_KEY_STALE);
-		} else if (hostorder_remote_peer_id < vpn->peer_id) {
-			/* Stay in INIT state */
-			log_msg(vpn, LOG_DEBUG, "will be key slave");
-		} else {
-			log_msg(vpn, LOG_NOTICE, "got same peer ID from remote, trying again.");
+			break;
+		case SLAVE:
+			/* Stay in INIT; waiting for KEY_SWITCH_START */
+			break;
+		case TIE:
 			generate_peer_id(vpn);
 			tx_peer_info(vpn);
+			break;
 		}
 		break;
 	case MASTER_KEY_READY:
