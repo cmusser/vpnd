@@ -214,7 +214,7 @@ or
 |Operating System|Notes|
 |---|---|
 |DragonFlyBSD|Works in all modes.|
-|FreeBSD|Works in `host-gw` and `net-gw` modes. `host` mode untested|
+|FreeBSD|Works in all modes.|
 |NetBSD|Works in `host-gw` and `net-gw` modes. `host` mode untested|
 |Linux|Porting not started. The event handling code (based on `kqueue`) would need to be replaced with `epoll` and the `timerfd_*` and `signalfd` family of functions. The commands used to configure networking would also need modification.|
 |Mac OS X|Doesn't compile currently. Needs the 3rd-party `tun(4)` KEXT. A compatibility function is needed for `clock_gettime(2)`.|

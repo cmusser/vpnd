@@ -374,7 +374,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				}
 			}
 			if (ok) {
-				if (resolv_addr != NULL && strlen(resolv_addr) > 0) {
+				if (strlen(resolv_addr) > 0) {
 					vpn->tx_peer_info.resolv_addr_family = inet_pton_any(vpn, resolv_addr,
 					    &vpn->tx_peer_info.resolv_addr);
 					if (vpn->tx_peer_info.resolv_addr_family == AF_UNSPEC)
@@ -384,7 +384,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				}
 			}
 			if (ok) {
-				if (resolv_domain != NULL && strlen(resolv_domain) > 0) {
+				if (strlen(resolv_domain) > 0) {
 					strlcpy(vpn->tx_peer_info.resolv_domain, resolv_domain,
 						sizeof(vpn->tx_peer_info.resolv_domain));
 				}
