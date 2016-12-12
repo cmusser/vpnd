@@ -6,6 +6,7 @@
 #include "os.h"
 #include "proto.h"
 
+#define VPND_CONF_FILENAME "/etc/vpnd.conf"
 int
 main(int argc, char *argv[])
 {
@@ -18,7 +19,7 @@ main(int argc, char *argv[])
 	char           *config_fname;
 
 	opts = "vfc:";
-	config_fname = "vpnd.conf";
+	config_fname = VPND_CONF_FILENAME;
 
 	while ((ch = getopt(argc, argv, opts)) != -1) {
 		switch (ch) {
@@ -33,10 +34,10 @@ main(int argc, char *argv[])
 			break;
 		default:
 			fprintf(stderr, "usage: vpnd [-vfc]\n");
-			fprintf(stderr, "  -f: foreground mode (default: daemon)\n");
+			fprintf(stderr, "  -f: foreground mode (default: run as a daemon)\n");
 			fprintf(stderr, "  -v: verbosity (default: NOTICE; use once for\n");
 			fprintf(stderr, "      INFO, multiple times for DEBUG)\n");
-			fprintf(stderr, "  -c: config file (default: vpnd.conf)\n");
+			fprintf(stderr, "  -c: config file (default: %s)\n", VPND_CONF_FILENAME);
 			exit(EXIT_FAILURE);
 		}
 	}

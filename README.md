@@ -82,13 +82,13 @@ access the internal network, each served by a dedicated `vpnd` process.
 As in the network gateway setup, the VPN gateway becomes a layer 3 router
 forwarding packets between connected clients and the internal network.
 ## Configuration and Startup
-The configuration file (`vpnd.conf` in the current directory, by
-default) contains one parameter per line, in the following format:
+The configuration file (`/etc/vpnd.conf` by default) contains one parameter
+per line, in the following format:
 
 `param_name: value`
 
 ### Key Generation
-1. Use the `keypair` program (included with the distribution)
+1. Use the `vpnd-keygen` program (included with the distribution)
    to create a public/private keypair and give the resulting public key
    to the operator of the peer system.
 2. Get the peer's public key.
@@ -102,7 +102,7 @@ default) contains one parameter per line, in the following format:
 |---|---|---|
 |`-v`| verbosity level|Specify once for NOTICE level verbosity, multiple times for DEBUG|
 |`-f`| foreground mode|Run in foreground. The default is to run as a  daemon|
-|`-c`| configuration file|Name of configuration file. The default is `vpnd.conf` in the current working directory|
+|`-c`| configuration file|Name of configuration file. The default is `/etc/vpnd.conf`|
 
 ### Configuration File Parameters
 |Parameter Name|Description|Required?|
@@ -110,9 +110,9 @@ default) contains one parameter per line, in the following format:
 |role|The networking role to assume: `net-gw`, `host-gw`, or `host`. These roles are explained above|no, defaults to `net-gw`|
 |device|The tunnel device path  |no, defaults to `/dev/tun0`.|
 |stats_prefix|prefix to use for Graphite data  |no, defaults to value from`gethostname(3)`.|
-|local_sk|The local secret key|yes, use values from `keypair` program.|
+|local_sk|The local secret key|yes, use values from `vpnd-keygen` program.|
 |local_port|local UDP port to listen on|no, defaults to 1337.|
-|remote_pk|The peer's public key|yes, use values from `keypair` program|
+|remote_pk|The peer's public key|yes, use values from `vpnd-keygen` program|
 |remote_host|hostname or IP address of remote peer.|yes, in `host` and `net-gw` role.|
 |remote_network|The address of the remote network.|yes, in `net-gw` role. Specified in CIDR notation, ie 192.168.1.0/24|
 |local_network|The address of the local network.|yes, in `host-gw` role. Specified in CIDR notation, ie 192.168.1.0/24|
@@ -123,7 +123,7 @@ default) contains one parameter per line, in the following format:
 |remote_port|UDP port on peer to listen on|no, defaults to 1337.|
 |max_key_age|Maximum age for ephemeral key, in seconds.|no, defaults to 60 seconds. Range is 30-3,600|
 |max_key_packets|Maximum number of packets that can be sent with ephemeral key|no, defaults to 100,000. Range is 5000-10,000,000|
-|nonce_file|Name of nonce reset point file|no, defaults to `vpnd.nonce`|
+|nonce_file|Name of nonce reset point file|no, defaults to `/var/db/vpnd.nonce`|
 |nonce_reset_incr|Interval for creating nonce reset point|no, defaults to 10000. Range is 16-20000|
 ### Configuration Examples
 

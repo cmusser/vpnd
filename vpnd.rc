@@ -1,0 +1,21 @@
+#!/bin/sh
+#
+
+# PROVIDE: vpnd
+# REQUIRE: DAEMON
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name=vpnd
+rcvar=vpnd_enable
+
+load_rc_config $name
+
+: ${vpnd_enable="NO"}
+: ${vpnd_pidfile="/var/run/${name}.pid"}
+
+command="/usr/local/sbin/${name}"
+pidfile="${vpndd_pidfile}"
+
+run_rc_command $*

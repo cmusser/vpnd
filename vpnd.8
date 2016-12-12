@@ -1,0 +1,224 @@
+.Dd Dec 11, 2016
+.Dt VPND 8
+.Os
+.\"
+.Sh NAME
+.Nm vpnd ,
+.Nd virtual private network daemon
+.\"
+.Sh SYNOPSIS
+.Nm
+.Op Fl df
+.Op Fl c Ar config_file
+.\"
+.Sh DESCRIPTION
+.Pp
+.Nm
+provides an encrypted virtual connection between two hosts,
+allowing the creation of secure network topologies. It uses
+NaCl for encryption and frequently changes the shared key
+used for communication, thereby providing forward secrecy.
+.Pp
+.Nm
+supports two VPN use cases:
+.Pp
+.Bl -bullet -offset indent -compact
+.It
+.Nm Network Gateway Mode:
+An individual client host needing access to a remote network, and a security gateway providing access to one or more such clients. This allows individual clients to access a main network.
+.It
+.Nm Host/Host Gateway Mode:
+A pair of hosts acting as security gateways that connect two internal networks together via a secure link. This connects all the hosts in two sites together.
+.El
+.Ss Network Gateway Mode
+In this mode, a pair of hosts--each with an interface on an internal
+network and another on the Internet--provide a communcation path for
+other hosts on the internal networks. This is akin to VPN software
+that connects geographically separated sites together. This is a useful
+setup, but less often seen outside of large companies.
+.Pp
+The configuration in this case is static because information about
+each network can be shared in advance and does not change often.
+Each gateway knows the address of its peer. The addresses of the
+other peer's internal network is also known, and a route to it
+via the VPN gateway can be configured in the default gateway for each
+internal network. The VPN gateways, in effect become layer 3 routers,
+and use the operating system's packet forwarding to move data.
+.Pp
+.Ss Host/Host Gateway Mode
+In this mode, a client host, often operating from behind a firewall,
+connects to a host that acts as a gateway to its internal
+network. This mode is used more widely: this is how mobile or remote
+users connect to corporate networks.
+.Pp
+Here, the network configuration is dynamic due to the nature of mobile
+hosts and NATs. `vpnd` performs the various network stack configuration
+changes, making connections easy to establish. The gateway discovers
+the address of the client host by passively listening until the client
+actually begins communication. When the connection becomes active, the
+gateway host provides the client with an address on a network dedicated
+to VPN clients, the network address of the internal network and DNS
+resolver information. This arrangement allows any number of clients to
+access the internal network, each served by a dedicated `vpnd` process.
+As in the network gateway setup, the VPN gateway becomes a layer 3 router
+forwarding packets between connected clients and the internal network.
+.Pp
+.Sh COMMAND LINE OPTIONS
+.Pp
+.Bl -tag -width indent
+.It Fl v
+Verbosity level. Specify once for NOTICE level verbosity, multiple times for DEBUG
+.It Fl f
+Run in the foreground. Warning messages are generated to standard error
+instead of
+.Xr syslog 3 . The default is to run as a daemon.
+.It Fl c
+Configuration file. If not specified, defaults to
+.Pa /etc/vpnd.conf
+.El
+.Sh CONFIGURATION FILE PARAMETERS
+.Pp
+.Bl -column -offset indent ".Sy nonce_reset_incr" ".Sy Description"
+.It Sy Name Ta Sy Description
+
+.It role Ta The networking role to assume:
+.Nm net-gw ,
+.Nm host-gw
+, or
+.Nmhost
+. These roles are explained above. Defaults to
+.Nm net-gw.
+
+.It device Ta The tunnel device path. Defaults to
+.Pa /dev/tun0
+.
+
+.It stats_prefix Ta Prefix to use for Graphite data. Defaults to value from
+.Xr gethostname 3.
+
+.It local_sk Ta The local secret key. Required. Use value produced by
+.Xr vpnd-keygen 8
+.
+
+.It local_port Ta Local UDP port to use. Defaults to 1337
+
+.It remote_pk Ta The peer's public key. Required. Use value produced by
+.Xr vpnd-keygen 8
+.
+
+.It remote_host Ta Hostname or IP address of remote peer. Required in
+.Nm host
+and
+.Nm net-gw
+roles.
+
+.It remote_network Ta Address of the remote network. Required in
+.Nm net-gw
+role. Specified in CIDR notation, ie 192.168.1.0/24.
+
+.It local_network Ta Address of the local network. Required in
+.Nm host-gw
+role. Specified in CIDR notation, ie 192.168.1.0/24.
+
+.It host_addr Ta Address to assign to the client and the prefix length of the associated network. Required in
+.Nm host-gw
+role. Specified in CIDR notation, ie 192.168.1.1/24.
+
+.It resolv_addr Ta Address of the DNS resolver to be used by the client. Optional in
+.Nm host-gw
+role; ignored otherwise.
+
+.It resolv_domain Ta DNS search domain to be used by the client. Optional in
+.Nm host-gw role
+; ignored otherwise.
+
+.It resolvconf_path Ta Path to the
+.Xr resolvconf 8
+utility. Defaults to
+.Pa /sbin/resolvconf
+. Only used in
+.Nm host
+role.
+
+.It remote_port Ta UDP port on peer. Defaults to 1337.
+
+.It max_key_age Ta  Maximum age for ephemeral shared key, in seconds. Defaults to 60 seconds. Range is 30-3600.
+
+.It max_key_packets Ta Maximum number of packets that can be sent with ephemeral shared key. Defaults to 100000. Range is 5000-10000000.
+
+.It nonce_file Ta Name of nonce reset point file. Defaults to
+.Pa /var/db/vpnd.nonce.
+
+.It nonce_reset_incr Ta Interval for creating nonce reset point, in seconds. Defaults to 10000. Range is 16-20000.
+.El
+.Sh CONFIGURATION EXAMPLES
+.Ss Network Gateways
+In this example, internal network #1 is 172.16.0.0/16 and the VPN gateway's address on this network is 172.16.0.2. Internal network #2 is 10.1.0.0/16 and the VPN gateway's address on this network is 10.1.0.2. We assume that both networks have another host that acts as the default router.
+
+.Em Gateway #1 config:
+
+.Bd -literal -offset indent
+local_sk: <local secret key>
+remote_pk: <gateway #2 public key>
+role: net-gw
+remote_host: vpn-gw.network-2.com
+.Ed
+.Pp
+Internal network #1's default router needs to be configured with a route to internal network #2, via its local VPN gateway:
+
+.Dl route add 10.1.0.0/16 172.16.0.2
+
+.Em Gateway #2 config:
+.Bd -literal -offset indent
+local_sk: <local secret key>
+remote_pk: <gateway #1 public key>
+role: net-gw
+remote_host: vpn--gw.network-1.com
+.Ed
+
+Similar to the above, internal network #2's default router needs to be configured with a route to internal network #1, via its local VPN gateway:
+
+.Dl route add 172.16.0.0/16 10.1.0.2
+
+.Ss Host/Host Gateway
+In this example the host gateway's network is 192.168.1.0/24 and its address is 192.168.1.2. 192.168.30.0/24 is a network block dedicated to VPN clients. On the host gateway, the vpnd can be started beforehand in the background. The client can be located on any network; it's location need not be known beforehand.
+
+.Em Host Gateway config:
+
+.Bd -literal -offset indent
+local_sk: <host gateway secret key>
+remote_pk: <client host public key>
+role: host-gw
+client_addr: 192.168.30.66/24
+local_network: 192.168.2.0/24
+resolv_addr: 192.168.1.2
+resolv_domain: my-internal-domain
+.Ed
+
+Similar to the network gateway case, the internal network's default router needs to route to the VPN client network via the VPN gateway:
+
+.Dl route add 192.168.30.0/24 192.168.1.2
+
+.Em Host config:
+.Bd -literal -offset indent
+local_sk: <client host secret key>
+remote_pk: <host gateway public key>
+role: host
+remote_host: vpn-host-gw.some-domain.com
+.Ed
+.Pp
+No route establishment or interface configuration commands need to be manually issued. vpnd will perform the necessary configuration.
+
+
+.Sh DIAGNOSTICS
+The current state is sent to the current logging output if the process receives the USR1 signal or if stats is typed into the console in foreground mode. Graphite plaintext formatted statistics are available by connecting to the
+.Pa /var/run/vpnd_stats.sock
+UNIX domain socket. An example of doing this on the command line is:
+
+.Dl nc -U /var/run/vpnd_stats.sock
+
+or
+.Dl socat - UNIX-CONNECT:/var/run/vpnd_stats.sock
+
+.Sh SEE ALSO
+.Xr vpnd-keypair 8

@@ -1,0 +1,29 @@
+.Dd Dec 12, 2015
+.Dt VPND-KEYGEN 8
+.Os
+.\"
+.Sh NAME
+.Nm vpnd-keygen
+.Nd Keypair generation utility for vpnd
+.\"
+.Sh SYNOPSIS
+.Nm
+.Ao name-prefix
+.\"
+.Sh DESCRIPTION
+.Nm
+generates a public/private keypair suitable for use with
+.Xr vpnd 8
+The private key should be copied into the local vpnd.conf file and the
+public key may be given to operator of the peer vpn server to add to its
+configuration. In both cases, the line can be cut and pasted as-is: it
+includes the correct configuration file attribute prefix.
+.Pp
+.Sh OPTIONS
+.Bl -tag -width indent
+.It Ao name-prefix Ac
+The prefix of the output filename. The suffix will be
+.Pa .keypair
+.El
+.Sh SEE ALSO
+.Xr vpnd 8

@@ -1,5 +1,5 @@
 vpnd
-keypair
+vpnd-keygen
 *.BAK
 *.conf
 *.keypair

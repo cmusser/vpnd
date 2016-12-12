@@ -30,8 +30,10 @@ main(int argc, char **argv)
 	}
 	sodium_bin2hex(sk_hex, sizeof(sk_hex), sk, sizeof(sk));
 	sodium_bin2hex(pk_hex, sizeof(pk_hex), pk, sizeof(pk));
-	fprintf(key_file, "secret: %s\n", sk_hex);
-	fprintf(key_file, "public: %s\n", pk_hex);
+	fprintf(key_file, "# Secret key: add to local vpnd.conf\n");
+	fprintf(key_file, "local_sk: %s\n", sk_hex);
+	fprintf(key_file, "# Public key: add to peer's vpnd.conf\n");
+	fprintf(key_file, "remote_pk: %s\n", pk_hex);
 
 	return EXIT_SUCCESS;
 }

@@ -165,7 +165,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		{"nonce reset increment", "nonce_reset_incr:", sizeof("nonce_reset_incr:"),
 		nonce_reset_incr, sizeof(nonce_reset_incr), "10000"},
 		{"nonce file", "nonce_file:", sizeof("nonce_file:"),
-		vpn->nonce_filename, sizeof(vpn->nonce_filename), "vpnd.nonce"},
+		vpn->nonce_filename, sizeof(vpn->nonce_filename), "/var/db/vpnd.nonce"},
 	};
 
 	size_t		bin_len;
