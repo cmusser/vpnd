@@ -14,7 +14,6 @@ vpnd-keygen: vpnd-keygen.c
 install: vpnd
 	cp vpnd ${DESTDIR}/${PREFIX}/sbin/
 	cp vpnd-keygen ${DESTDIR}/${PREFIX}/bin/
-	cp vpnd.rc ${DESTDIR}/${PREFIX}/etc/rc.d/vpnd
 	cp vpnd.8 ${DESTDIR}/${PREFIX}/man/man8/vpnd.8
 	cp vpnd-keygen.8 ${DESTDIR}/${PREFIX}/man/man8/vpnd-keygen.8
 
