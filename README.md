@@ -192,9 +192,17 @@ local_sk: <client host secret key>
 remote_pk: <host gateway public key>
 role: host
 remote_host: vpn-host-gw.some-domain.com
+resolvconf_path: /usr/local/sbin/resolvconf
 ```
 No route establishment or interface configuration commands need to be manually
-issued. `vpnd` will perform the necessary configuration.
+issued. `vpnd` will perform the necessary configuration. Note that the above
+specifies `resolvconf_path` which is not needed on systems that install `resolvconf`
+in the default place. If the system does need to have `resolvconf` installed as an
+add-on feature, make sure that the resolver configuration is properly symlinked, e.g.
+
+```
+ln -s /usr/local/etc/resolvconf/run/resolv.conf /etc/resolv.conf
+```
 
 ## Statistics and Diagnostics
 

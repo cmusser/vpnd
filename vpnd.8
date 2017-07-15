@@ -205,10 +205,15 @@ local_sk: <client host secret key>
 remote_pk: <host gateway public key>
 role: host
 remote_host: vpn-host-gw.some-domain.com
+resolvconf_path: /usr/local/sbin/resolvconf
 .Ed
 .Pp
-No route establishment or interface configuration commands need to be manually issued. vpnd will perform the necessary configuration.
-
+No route establishment or interface configuration commands need to be manually issued. vpnd will perform the necessary configuration. Note that the above specifies
+.Pa resolvconf_path
+which is not needed on systems that install resolvconf in the default place. If the system does need to have resolvconf installed as an add-on feature, make sure that the resolver configuration is properly symlinked, e.g.
+.Bd -literal -offset indent
+ln -s /usr/local/etc/resolvconf/run/resolv.conf /etc/resolv.conf
+.Ed
 
 .Sh DIAGNOSTICS
 The current state is sent to the current logging output if the process receives the USR1 signal or if stats is typed into the console in foreground mode. Graphite plaintext formatted statistics are available by connecting to the

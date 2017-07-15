@@ -1107,15 +1107,15 @@ stats_sock_input(struct vpn_state *vpn)
 		time(&n);
 		now = (long long)n;
 		snprintf(stats_buf, sizeof(stats_buf),
-			 "%s.keys %" PRIu32 " %lld\n"
-			 "%s.keys %" PRIu32 " %lld\n"
-			 "%s.sessions %" PRIu32 " %lld\n"
-			 "%s.rx %" PRIu32 " %lld\n"
-			 "%s.tx %" PRIu32 " %lld\n"
-			 "%s.peer_info_retransmits %" PRIu32 " %lld\n"
-			 "%s.key_switch_start_retransmits %" PRIu32 " %lld\n"
-			 "%s.key_ack_retransmits %" PRIu32 " %lld\n"
-			 "%s.key_ready_retransmits %" PRIu32 " %lld\n",
+			 "%s.vpnd.keys %" PRIu32 " %lld\n"
+			 "%s.vpnd.keys %" PRIu32 " %lld\n"
+			 "%s.vpnd.sessions %" PRIu32 " %lld\n"
+			 "%s.vpnd.rx %" PRIu32 " %lld\n"
+			 "%s.vpnd.tx %" PRIu32 " %lld\n"
+			 "%s.vpnd.peer_info_retransmits %" PRIu32 " %lld\n"
+			 "%s.vpnd.key_switch_start_retransmits %" PRIu32 " %lld\n"
+			 "%s.vpnd.key_ack_retransmits %" PRIu32 " %lld\n"
+			 "%s.vpnd.key_ready_retransmits %" PRIu32 " %lld\n",
 			 vpn->stats_prefix, vpn->keys_used, now,
 			 vpn->stats_prefix, vpn->keys_used, now,
 			 vpn->stats_prefix, vpn->sess_starts, now,
