@@ -129,6 +129,27 @@ extern const char *timer_type_string_array[];
 	(((type) >= TIMER_TYPE_LAST_PLUS_ONE) \
 	    ? "UNKNOWN" : timer_type_string_array[(type)])
 
+/* Nonce types */
+typedef enum {
+	LOCAL,
+	REMOTE,
+	NONCE_TYPE_LAST_PLUS_ONE,
+}		nonce_type;
+
+#ifdef _DECL_STRINGS_
+const char     *nonce_type_string_array[NONCE_TYPE_LAST_PLUS_ONE] =
+{
+	"local",
+	"remote",
+};
+#else
+extern const char *nonce_type_string_array[];
+#endif
+
+#define NONCE_TYPE_STR(type) \
+	(((type) >= NONCE_TYPE_LAST_PLUS_ONE) \
+	    ? "UNKNOWN" : nonce_type_string_array[(type)])
+
 struct vpn_peer_info {
 	uint32_t	peer_id;
 	sa_family_t	host_addr_family;
@@ -149,7 +170,8 @@ struct vpn_state {
 	vpn_role	role;
 	vpn_state	state;
 	char		tun_name  [8];
-	char		nonce_filename[256];
+	char		local_nonce_filename[256];
+	char		remote_nonce_filename[256];
 	char		resolvconf_path[256];
 	bool		already_ip_forwarding;
 	bool		already_ip6_forwarding;

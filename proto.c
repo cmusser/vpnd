@@ -25,6 +25,7 @@
 #include "os.h"
 #include "proto.h"
 
+#define DEFAULT_VPND_PORT "4706"
 #define PEER_MAX_HEARTBEAT_INTERVAL_SECS 20
 #define MAX_HOST_GW_INIT_SECS 120
 #define PEER_INIT_RETRANS_INTERVAL (5 * 1000)
@@ -139,13 +140,13 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		{"local secret key", "local_sk:", sizeof("local_sk:"),
 		local_sk_hex, sizeof(local_sk_hex), NULL},
 		{"local port", "local_port:", sizeof("local_port:"),
-		local_port, sizeof(local_port), "1337"},
+		local_port, sizeof(local_port), DEFAULT_VPND_PORT},
 		{"remote public key", "remote_pk:", sizeof("remote_pk:"),
 		remote_pk_hex, sizeof(remote_pk_hex), NULL},
 		{"remote host", "remote_host:", sizeof("remote_host:"),
 		remote_host, sizeof(remote_host), NULL},
 		{"remote port", "remote_port:", sizeof("remote_port:"),
-		remote_port, sizeof(remote_port), "1337"},
+		remote_port, sizeof(remote_port), DEFAULT_VPND_PORT},
 		{"host address", "host_addr:", sizeof("host_addr:"),
 		host_addr, sizeof(host_addr), NULL},
 		{"remote network", "remote_network:", sizeof("remote_network:"),
@@ -164,8 +165,10 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		max_key_sent_packet_count, sizeof(max_key_sent_packet_count), "100000"},
 		{"nonce reset increment", "nonce_reset_incr:", sizeof("nonce_reset_incr:"),
 		nonce_reset_incr, sizeof(nonce_reset_incr), "10000"},
-		{"nonce file", "nonce_file:", sizeof("nonce_file:"),
-		vpn->nonce_filename, sizeof(vpn->nonce_filename), "/var/db/vpnd.nonce"},
+		{"local nonce file", "local_nonce_file:", sizeof("local_nonce_file:"),
+		vpn->local_nonce_filename, sizeof(vpn->local_nonce_filename), "/var/db/local_vpnd.nonce"},
+		{"remote nonce file", "remote_nonce_file:", sizeof("remote_nonce_file:"),
+		vpn->remote_nonce_filename, sizeof(vpn->remote_nonce_filename), "/var/db/remote_vpnd.nonce"},
 	};
 
 	size_t		bin_len;
@@ -555,14 +558,22 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		}
 		if (ok) {
 			generate_peer_id(vpn);
-			if (read_nonce_reset_point(vpn, vpn->nonce)) {
+			if (read_nonce(vpn, LOCAL)) {
 				log_nonce(vpn, "read nonce reset point", vpn->nonce);
 			} else {
 				randombytes_buf(vpn->nonce, sizeof(vpn->nonce));
 				log_nonce(vpn, "generating initial nonce", vpn->nonce);
 			}
-			write_nonce_reset_point(vpn);
-			bzero(vpn->remote_nonce, sizeof(vpn->remote_nonce));
+			write_nonce(vpn, LOCAL);
+
+			if (read_nonce(vpn, REMOTE)) {
+				log_nonce(vpn, "read remote nonce reset point",
+					  vpn->remote_nonce);
+			} else {
+				bzero(vpn->remote_nonce, sizeof(vpn->remote_nonce));
+				log_nonce(vpn, "initializing remote nonce",
+					  vpn->remote_nonce);
+			}
 
 			EV_SET(&vpn->kev_changes[0], vpn->ext_sock,
 			       EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
@@ -735,7 +746,7 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 	vpn->nonce_incr_count++;
 
 	if (vpn->nonce_incr_count == vpn->nonce_reset_incr)
-		write_nonce_reset_point(vpn);
+		write_nonce(vpn, LOCAL);
 
 	return ok;
 }
@@ -1113,7 +1124,7 @@ stats_sock_input(struct vpn_state *vpn)
 			 "%s.vpnd.rx %" PRIu32 " %lld\n"
 			 "%s.vpnd.tx %" PRIu32 " %lld\n"
 			 "%s.vpnd.peer_info_retransmits %" PRIu32 " %lld\n"
-			 "%s.vpnd.key_switch_start_retransmits %" PRIu32 " %lld\n"
+		   "%s.vpnd.key_switch_start_retransmits %" PRIu32 " %lld\n"
 			 "%s.vpnd.key_ack_retransmits %" PRIu32 " %lld\n"
 			 "%s.vpnd.key_ready_retransmits %" PRIu32 " %lld\n",
 			 vpn->stats_prefix, vpn->keys_used, now,

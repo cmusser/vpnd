@@ -96,9 +96,7 @@ log_stats(struct vpn_state *vpn)
 	struct timespec	now;
 	time_t		cur_inactive_secs, cur_sess_active_secs;
 	char		cur_inactive_str[32], cur_sess_active_str[32];
-	unsigned char	rp_nonce[crypto_box_NONCEBYTES];
 	char		tx_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
-	char		rp_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
 	char		rx_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
 	char		host_addr_str[INET6_ADDRSTRLEN];
 	char		remote_net_str[INET6_ADDRSTRLEN];
@@ -108,8 +106,6 @@ log_stats(struct vpn_state *vpn)
 	get_cur_monotonic(&now);
 	cur_inactive_secs = vpn->inactive_secs;
 	cur_sess_active_secs = vpn->sess_active_secs;
-
-	read_nonce_reset_point(vpn, rp_nonce);
 
 	switch (vpn->role) {
 	case HOST:
@@ -171,7 +167,6 @@ log_stats(struct vpn_state *vpn)
 		"last peer message: %" PRIu32 " sec. ago\n"
 		"nonces since reset: %" PRIu32 "\n"
 		"TX nonce: %s\n"
-		"RP nonce: %s\n"
 		"RX nonce: %s%s",
 		VPN_ROLE_STR(vpn->role),
 		VPN_STATE_STR(vpn->state),
@@ -188,8 +183,6 @@ log_stats(struct vpn_state *vpn)
 		vpn->nonce_incr_count,
 	      sodium_bin2hex(tx_nonce_str, sizeof(tx_nonce_str), vpn->nonce,
 			     crypto_box_NONCEBYTES),
-		sodium_bin2hex(rp_nonce_str, sizeof(rp_nonce_str), rp_nonce,
-			       crypto_box_NONCEBYTES),
 	sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str), vpn->remote_nonce,
 		       crypto_box_NONCEBYTES),
 		peer_info_str);

@@ -68,6 +68,8 @@ forwarding packets between connected clients and the internal network.
 .Bl -tag -width indent
 .It Fl v
 Verbosity level. Specify once for NOTICE level verbosity, multiple times for DEBUG
+.It Fl V
+Display version, then exit
 .It Fl f
 Run in the foreground. Warning messages are generated to standard error
 instead of
@@ -146,8 +148,11 @@ role.
 
 .It max_key_packets Ta Maximum number of packets that can be sent with ephemeral shared key. Defaults to 100000. Range is 5000-10000000.
 
-.It nonce_file Ta Name of nonce reset point file. Defaults to
-.Pa /var/db/vpnd.nonce.
+.It local_nonce_file Ta Name of local nonce reset point file. Defaults to
+.Pa /var/db/local_vpnd.nonce.
+
+.It remote_nonce_file Ta Name of remote nonce file. Defaults to
+.Pa /var/db/remote_vpnd.nonce.
 
 .It nonce_reset_incr Ta Interval for creating nonce reset point, in seconds. Defaults to 10000. Range is 16-20000.
 .El

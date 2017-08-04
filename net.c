@@ -66,6 +66,7 @@ get_sockaddr(struct vpn_state *vpn, struct addrinfo **addrinfo_p, char *host, ch
 {
 	bool		ok;
 	struct addrinfo	hints = {'\0'};
+	int gai_error;
 
 	ok = true;
 	hints.ai_family = PF_INET;
@@ -75,10 +76,10 @@ get_sockaddr(struct vpn_state *vpn, struct addrinfo **addrinfo_p, char *host, ch
 	if (passive)
 		hints.ai_flags |= AI_PASSIVE;
 
-	if (getaddrinfo(host, port_str, &hints, addrinfo_p)) {
+	if ((gai_error = getaddrinfo(host, port_str, &hints, addrinfo_p))) {
 		ok = false;
-		log_msg(vpn, LOG_ERR, "invalid socket address info: \"%s:%s\"",
-			host, port_str);
+		log_msg(vpn, LOG_ERR, "invalid socket address info: \"%s:%s\" (%s)",
+		    host, port_str, gai_strerror(gai_error));
 	}
 	return ok;
 }

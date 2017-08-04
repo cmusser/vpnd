@@ -101,7 +101,8 @@ per line, in the following format:
 |Option|Description|Notes|
 |---|---|---|
 |`-v`| verbosity level|Specify once for NOTICE level verbosity, multiple times for DEBUG|
-|`-f`| foreground mode|Run in foreground. The default is to run as a  daemon|
+|`-V`| display version, then exit|
+|`-f`| foreground mode|Run in foreground. The default is to run as a daemon|
 |`-c`| configuration file|Name of configuration file. The default is `/etc/vpnd.conf`|
 
 ### Configuration File Parameters
@@ -123,8 +124,9 @@ per line, in the following format:
 |remote_port|UDP port on peer to listen on|no, defaults to 1337.|
 |max_key_age|Maximum age for ephemeral key, in seconds.|no, defaults to 60 seconds. Range is 30-3,600|
 |max_key_packets|Maximum number of packets that can be sent with ephemeral key|no, defaults to 100,000. Range is 5000-10,000,000|
-|nonce_file|Name of nonce reset point file|no, defaults to `/var/db/vpnd.nonce`|
-|nonce_reset_incr|Interval for creating nonce reset point|no, defaults to 10000. Range is 16-20000|
+|local_nonce_file|Name of local nonce reset point file|no, defaults to `/var/db/local_vpnd.nonce`|
+|remote_nonce_file|Name of remote nonce file|no, defaults to `/var/db/remote_vpnd.nonce`|
+|nonce_reset_incr|Interval for creating the reset point for the local nonce|no, defaults to 10000. Range is 16-20000|
 ### Configuration Examples
 
 #### Network Gateways

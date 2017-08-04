@@ -4,3 +4,4 @@ vpnd-keygen
 *.conf
 *.keypair
 *.nonce
+cscope.out

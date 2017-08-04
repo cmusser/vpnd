@@ -7,6 +7,8 @@
 #include "proto.h"
 
 #define VPND_CONF_FILENAME "/etc/vpnd.conf"
+#define VPND_VERSION "1.0.2"
+
 int
 main(int argc, char *argv[])
 {
@@ -18,13 +20,17 @@ main(int argc, char *argv[])
 	struct vpn_state vpn;
 	char           *config_fname;
 
-	opts = "vfc:";
+	opts = "vVfc:";
 	config_fname = VPND_CONF_FILENAME;
 
 	while ((ch = getopt(argc, argv, opts)) != -1) {
 		switch (ch) {
 		case 'v':
 			vflag++;
+			break;
+		case 'V':
+			printf("vpnd %s\n", VPND_VERSION);
+			exit(0);
 			break;
 		case 'f':
 			fflag = true;
@@ -33,10 +39,11 @@ main(int argc, char *argv[])
 			config_fname = optarg;
 			break;
 		default:
-			fprintf(stderr, "usage: vpnd [-vfc]\n");
+			fprintf(stderr, "usage: vpnd [-vVfc]\n");
 			fprintf(stderr, "  -f: foreground mode (default: run as a daemon)\n");
 			fprintf(stderr, "  -v: verbosity (default: NOTICE; use once for\n");
 			fprintf(stderr, "      INFO, multiple times for DEBUG)\n");
+			fprintf(stderr, "  -V: display version, then exit\n");
 			fprintf(stderr, "  -c: config file (default: %s)\n", VPND_CONF_FILENAME);
 			exit(EXIT_FAILURE);
 		}

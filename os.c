@@ -11,22 +11,32 @@
 #include "proto.h"
 
 bool
-read_nonce_reset_point(struct vpn_state *vpn, unsigned char *nonce)
+read_nonce(struct vpn_state *vpn, nonce_type type)
 {
 	bool		ok = true;
+	char           *nonce_filename;
 	FILE           *f;
+	unsigned char  *nonce;
 
-	f = fopen(vpn->nonce_filename, "r");
+	if (type == LOCAL) {
+		nonce_filename = vpn->local_nonce_filename;
+		nonce = vpn->nonce;
+	} else {
+		nonce_filename = vpn->remote_nonce_filename;
+		nonce = vpn->remote_nonce;
+	}
+
+	f = fopen(nonce_filename, "r");
 	if (f == NULL) {
 		ok = false;
 		log_msg(vpn, LOG_ERR, "failed to open nonce file %s: %s\n",
-			vpn->nonce_filename, strerror(errno));
+			nonce_filename, strerror(errno));
 	}
 	if (ok) {
 		if (fread(nonce, crypto_box_NONCEBYTES, 1, f) < 1) {
 			ok = false;
 			log_msg(vpn, LOG_ERR, "Can't read nonce from %s: %s\n",
-				vpn->nonce_filename, strerror(errno));
+				nonce_filename, strerror(errno));
 		}
 	}
 	if (f != NULL)
@@ -36,29 +46,42 @@ read_nonce_reset_point(struct vpn_state *vpn, unsigned char *nonce)
 }
 
 void
-write_nonce_reset_point(struct vpn_state *vpn)
+write_nonce(struct vpn_state *vpn, nonce_type type)
 {
 	bool		ok = true;
-	unsigned char	nonce_reset_point[crypto_box_NONCEBYTES];
+	unsigned char	output_nonce[crypto_box_NONCEBYTES];
+	char           *nonce_filename;
 	FILE           *f;
+	unsigned char  *input_nonce;
 
-	vpn->nonce_incr_count = 0;
+	if (type == LOCAL) {
+		vpn->nonce_incr_count = 0;
+		nonce_filename = vpn->local_nonce_filename;
+		input_nonce = vpn->nonce;
+	} else {
+		nonce_filename = vpn->remote_nonce_filename;
+		input_nonce = vpn->remote_nonce;
+	}
 
-	f = fopen(vpn->nonce_filename, "w");
+	f = fopen(nonce_filename, "w");
 	if (f == NULL) {
 		ok = false;
 		log_msg(vpn, LOG_ERR, "failed to open nonce file %s: %s\n",
-			vpn->nonce_filename, strerror(errno));
+			nonce_filename, strerror(errno));
 	}
 	if (ok) {
-		memcpy(nonce_reset_point, vpn->nonce, sizeof(nonce_reset_point));
-		sodium_add(nonce_reset_point, vpn->nonce_reset_incr_bin,
-			   sizeof(nonce_reset_point));
-		log_nonce(vpn, "create nonce reset point", nonce_reset_point);
-		if (fwrite(nonce_reset_point, sizeof(nonce_reset_point), 1, f) < 1) {
+		memcpy(output_nonce, input_nonce, sizeof(output_nonce));
+		if (type == LOCAL) {
+			sodium_add(output_nonce, vpn->nonce_reset_incr_bin,
+				   sizeof(output_nonce));
+			log_nonce(vpn, "create nonce reset point", output_nonce);
+		} else {
+			log_nonce(vpn, "storing remote nonce", output_nonce);
+		}
+		if (fwrite(output_nonce, sizeof(output_nonce), 1, f) < 1) {
 			ok = false;
 			log_msg(vpn, LOG_ERR, "failed to write nonce to %s: %s\n",
-				vpn->nonce_filename, strerror(errno));
+				nonce_filename, strerror(errno));
 		}
 	}
 	if (f != NULL)
@@ -195,6 +218,7 @@ run(struct vpn_state *vpn)
 						ok = false;
 						log_msg(vpn, LOG_NOTICE, "shutting down (signal %u)",
 							event.ident);
+						write_nonce(vpn, REMOTE);
 						return_to_init_state(vpn);
 						break;
 					default:

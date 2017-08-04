@@ -6,8 +6,8 @@
 #define SYS_IP_FORWARDING "net.inet.ip.forwarding"
 #define SYS_IP6_FORWARDING "net.inet6.ip6.forwarding"
 
-bool		read_nonce_reset_point(struct vpn_state *vpn, unsigned char *nonce);
-void		write_nonce_reset_point(struct vpn_state *vpn);
+bool		read_nonce(struct vpn_state *vpn, nonce_type type);
+void		write_nonce(struct vpn_state *vpn, nonce_type type);
 bool		get_sysctl_bool(struct vpn_state *vpn, char *name);
 void		set_sysctl_bool(struct vpn_state *vpn, char *name, bool value);
 void		get_cur_monotonic(struct timespec *tp);
