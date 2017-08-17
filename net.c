@@ -18,6 +18,7 @@
 #include "net.h"
 #include "os.h"
 
+#define DUMMY_REMOTE_NET_ADDR "192.168.239.254"
 #ifndef ETHER_ADDRSTRLEN
 #define ETHER_ADDRSTRLEN 17
 #endif
@@ -208,8 +209,8 @@ manage_host_ptp_addrs(struct vpn_state *vpn)
 			break;
 		case ACTIVE_MASTER:
 		case ACTIVE_SLAVE:
-			snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s %s 10.0.0.1",
-				 vpn->tun_name, host_addr_str);
+			snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s %s %s",
+				 vpn->tun_name, host_addr_str, DUMMY_REMOTE_NET_ADDR);
 			log_msg(vpn, LOG_NOTICE, "%s: %s",
 				VPN_ROLE_STR(vpn->role), cmd);
 			spawn_subprocess(vpn, cmd);
@@ -243,8 +244,8 @@ manage_host_gw_ptp_addrs(struct vpn_state *vpn)
 			break;
 		case ACTIVE_MASTER:
 		case ACTIVE_SLAVE:
-			snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s 10.0.0.1 %s",
-				 vpn->tun_name, host_addr_str);
+			snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s %s %s",
+			    vpn->tun_name, DUMMY_REMOTE_NET_ADDR, host_addr_str);
 			log_msg(vpn, LOG_NOTICE, "%s: %s", VPN_ROLE_STR(vpn->role), cmd);
 			spawn_subprocess(vpn, cmd);
 			break;
@@ -297,7 +298,7 @@ manage_net_gw_tun_intf(struct vpn_state *vpn)
 	char		cmd       [256] = {'\0'};
 
 #ifdef __NetBSD__
-	const char	*ifconfig_addr = "10.0.0.1 ";
+	const char	*ifconfig_addr = DUMMY_REMOTE_NET_ADDR;
 #else
 	const char	*ifconfig_addr = "";
 #endif
