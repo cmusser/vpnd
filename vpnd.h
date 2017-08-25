@@ -209,6 +209,7 @@ struct vpn_state {
 	uint32_t	kev_change_count;
 	uint32_t	rx_bytes;
 	uint32_t	tx_bytes;
+	uint32_t	bad_nonces;
 	uint32_t	peer_init_retransmits;
 	uint32_t	key_switch_start_retransmits;
 	uint32_t	key_switch_ack_retransmits;

@@ -603,6 +603,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				vpn->kev_change_count++;
 			}
 			vpn->rx_bytes = vpn->tx_bytes =
+				vpn->bad_nonces =
 				vpn->peer_init_retransmits =
 				vpn->key_switch_start_retransmits =
 				vpn->key_switch_ack_retransmits =
@@ -1054,6 +1055,7 @@ ext_sock_input(struct vpn_state *vpn)
 	if (ok) {
 		if (sodium_compare(vpn->remote_nonce, rx_nonce, crypto_box_NONCEBYTES) > -1) {
 			ok = false;
+			vpn->bad_nonces++;
 			log_msg(vpn, LOG_ERR, "%s: received nonce (%s) <= previous (%s)",
 				VPN_STATE_STR(vpn->state),
 			  sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str),
@@ -1123,6 +1125,7 @@ stats_sock_input(struct vpn_state *vpn)
 			 "%s.vpnd.sessions %" PRIu32 " %lld\n"
 			 "%s.vpnd.rx %" PRIu32 " %lld\n"
 			 "%s.vpnd.tx %" PRIu32 " %lld\n"
+			 "%s.vpnd.bad_nonces %" PRIu32 " %lld\n"
 			 "%s.vpnd.peer_info_retransmits %" PRIu32 " %lld\n"
 		   "%s.vpnd.key_switch_start_retransmits %" PRIu32 " %lld\n"
 			 "%s.vpnd.key_ack_retransmits %" PRIu32 " %lld\n"
@@ -1132,6 +1135,7 @@ stats_sock_input(struct vpn_state *vpn)
 			 vpn->stats_prefix, vpn->sess_starts, now,
 			 vpn->stats_prefix, vpn->rx_bytes, now,
 			 vpn->stats_prefix, vpn->tx_bytes, now,
+			 vpn->stats_prefix, vpn->bad_nonces, now,
 			 vpn->stats_prefix, vpn->peer_init_retransmits, now,
 		  vpn->stats_prefix, vpn->key_switch_start_retransmits, now,
 		    vpn->stats_prefix, vpn->key_switch_ack_retransmits, now,

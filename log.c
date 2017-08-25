@@ -101,54 +101,10 @@ log_stats(struct vpn_state *vpn)
 	char		host_addr_str[INET6_ADDRSTRLEN];
 	char		remote_net_str[INET6_ADDRSTRLEN];
 	char		resolv_addr_str[INET6_ADDRSTRLEN];
-	char		peer_info_str[256] = {'\0'};
 
 	get_cur_monotonic(&now);
 	cur_inactive_secs = vpn->inactive_secs;
 	cur_sess_active_secs = vpn->sess_active_secs;
-
-	switch (vpn->role) {
-	case HOST:
-		snprintf(peer_info_str, sizeof(peer_info_str),
-			 "\nRX peerinfo:\n"
-			 "  host: %s/%d\n"
-			 "  remote network: %s/%d\n"
-			 "  resolver: %s\n"
-			 "  domain: %s",
-			 string_for_addr(vpn->rx_peer_info.host_addr_family,
-				&vpn->rx_peer_info.host_addr, host_addr_str,
-		  sizeof(host_addr_str)), vpn->rx_peer_info.host_prefix_len,
-		   string_for_addr(vpn->rx_peer_info.remote_net_addr_family,
-			      &vpn->rx_peer_info.remote_net, remote_net_str,
-				   sizeof(remote_net_str)), vpn->rx_peer_info.remote_net_prefix_len,
-		       string_for_addr(vpn->rx_peer_info.resolv_addr_family,
-			    &vpn->rx_peer_info.resolv_addr, resolv_addr_str,
-				       sizeof(resolv_addr_str)),
-			 strlen(vpn->rx_peer_info.resolv_domain) > 0
-			 ? vpn->rx_peer_info.resolv_domain : "<none>");
-		break;
-	case HOST_GW:
-		snprintf(peer_info_str, sizeof(peer_info_str),
-			 "\nTX peerinfo:\n"
-			 "  host: %s/%d\n"
-			 "  local network: %s/%d\n"
-			 "  resolver: %s\n"
-			 "  domain: %s",
-			 string_for_addr(vpn->tx_peer_info.host_addr_family,
-				&vpn->tx_peer_info.host_addr, host_addr_str,
-		  sizeof(host_addr_str)), vpn->tx_peer_info.host_prefix_len,
-		   string_for_addr(vpn->tx_peer_info.remote_net_addr_family,
-			      &vpn->tx_peer_info.remote_net, remote_net_str,
-				   sizeof(remote_net_str)), vpn->tx_peer_info.remote_net_prefix_len,
-		       string_for_addr(vpn->tx_peer_info.resolv_addr_family,
-			    &vpn->tx_peer_info.resolv_addr, resolv_addr_str,
-				       sizeof(resolv_addr_str)),
-			 strlen(vpn->tx_peer_info.resolv_domain) > 0
-			 ? vpn->tx_peer_info.resolv_domain : "<none>");
-		break;
-	default:
-		break;
-	}
 
 	if (vpn->state == ACTIVE_MASTER || vpn->state == ACTIVE_SLAVE) {
 		cur_sess_active_secs += (now.tv_sec - vpn->sess_start_ts.tv_sec);
@@ -161,13 +117,12 @@ log_stats(struct vpn_state *vpn)
 		"sessions: %" PRIu32 ", keys used: %" PRIu32 " (max age %" PRIu32 " sec.)\n"
 		"time inactive/active: %s/%s\n"
 		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
+		"bad nonces: %" PRIu32 "\n"
+		"nonces since reset: %" PRIu32 "\n"
 		"decrypt failures: %" PRIu32 "\n"
 		"retransmits (pi/kss/ksa/kr): %" PRIu32
 		"/%" PRIu32 "/%" PRIu32 "/%" PRIu32 "\n"
-		"last peer message: %" PRIu32 " sec. ago\n"
-		"nonces since reset: %" PRIu32 "\n"
-		"TX nonce: %s\n"
-		"RX nonce: %s%s",
+		"last peer message: %" PRIu32 " sec. ago\n",
 		VPN_ROLE_STR(vpn->role),
 		VPN_STATE_STR(vpn->state),
 		vpn->sess_starts, vpn->keys_used, vpn->max_key_age_secs,
@@ -175,15 +130,62 @@ log_stats(struct vpn_state *vpn)
 			 sizeof(cur_inactive_str)),
 		time_str(cur_sess_active_secs, cur_sess_active_str,
 			 sizeof(cur_sess_active_str)),
-		vpn->rx_bytes, vpn->tx_bytes, vpn->decrypt_failures,
+		vpn->rx_bytes, vpn->tx_bytes,
+		vpn->bad_nonces, vpn->nonce_incr_count, vpn->decrypt_failures,
 		vpn->peer_init_retransmits,
 	 vpn->key_switch_start_retransmits, vpn->key_switch_ack_retransmits,
 		vpn->key_ready_retransmits,
-		(now.tv_sec - vpn->peer_last_heartbeat_ts.tv_sec),
-		vpn->nonce_incr_count,
-	      sodium_bin2hex(tx_nonce_str, sizeof(tx_nonce_str), vpn->nonce,
-			     crypto_box_NONCEBYTES),
-	sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str), vpn->remote_nonce,
+		(now.tv_sec - vpn->peer_last_heartbeat_ts.tv_sec));
+
+	log_msg(vpn, LOG_NOTICE, "--- vpnd nonces ---\n"
+		"TX nonce: %s\n"
+		"RX nonce: %s\n",
+	sodium_bin2hex(tx_nonce_str, sizeof(tx_nonce_str), vpn->remote_nonce,
 		       crypto_box_NONCEBYTES),
-		peer_info_str);
+	      sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str), vpn->nonce,
+			     crypto_box_NONCEBYTES));
+
+	switch (vpn->role) {
+	case HOST:
+		log_msg(vpn, LOG_NOTICE, "--- vpnd peerinfo ---\n"
+			"RX peerinfo:\n"
+			"  host: %s/%d\n"
+			"  remote network: %s/%d\n"
+			"  resolver: %s\n"
+			"  domain: %s",
+			string_for_addr(vpn->rx_peer_info.host_addr_family,
+				&vpn->rx_peer_info.host_addr, host_addr_str,
+		  sizeof(host_addr_str)), vpn->rx_peer_info.host_prefix_len,
+		   string_for_addr(vpn->rx_peer_info.remote_net_addr_family,
+			      &vpn->rx_peer_info.remote_net, remote_net_str,
+				   sizeof(remote_net_str)), vpn->rx_peer_info.remote_net_prefix_len,
+			string_for_addr(vpn->rx_peer_info.resolv_addr_family,
+			    &vpn->rx_peer_info.resolv_addr, resolv_addr_str,
+					sizeof(resolv_addr_str)),
+			strlen(vpn->rx_peer_info.resolv_domain) > 0
+			? vpn->rx_peer_info.resolv_domain : "<none>");
+		break;
+	case HOST_GW:
+		log_msg(vpn, LOG_NOTICE, "--- nonces ---\n"
+			"\nTX peerinfo:\n"
+			"  host: %s/%d\n"
+			"  local network: %s/%d\n"
+			"  resolver: %s\n"
+			"  domain: %s",
+			string_for_addr(vpn->tx_peer_info.host_addr_family,
+				&vpn->tx_peer_info.host_addr, host_addr_str,
+		  sizeof(host_addr_str)), vpn->tx_peer_info.host_prefix_len,
+		   string_for_addr(vpn->tx_peer_info.remote_net_addr_family,
+			      &vpn->tx_peer_info.remote_net, remote_net_str,
+				   sizeof(remote_net_str)), vpn->tx_peer_info.remote_net_prefix_len,
+			string_for_addr(vpn->tx_peer_info.resolv_addr_family,
+			    &vpn->tx_peer_info.resolv_addr, resolv_addr_str,
+					sizeof(resolv_addr_str)),
+			strlen(vpn->tx_peer_info.resolv_domain) > 0
+			? vpn->tx_peer_info.resolv_domain : "<none>");
+		break;
+	default:
+		break;
+	}
+
 }
