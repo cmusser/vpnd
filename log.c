@@ -140,9 +140,9 @@ log_stats(struct vpn_state *vpn)
 	log_msg(vpn, LOG_NOTICE, "--- vpnd nonces ---\n"
 		"TX nonce: %s\n"
 		"RX nonce: %s\n",
-	sodium_bin2hex(tx_nonce_str, sizeof(tx_nonce_str), vpn->remote_nonce,
+	sodium_bin2hex(tx_nonce_str, sizeof(tx_nonce_str), vpn->nonce,
 		       crypto_box_NONCEBYTES),
-	      sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str), vpn->nonce,
+	      sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str), vpn->remote_nonce,
 			     crypto_box_NONCEBYTES));
 
 	switch (vpn->role) {
