@@ -116,7 +116,9 @@ log_stats(struct vpn_state *vpn)
 		"%s is %s:\n"
 		"sessions: %" PRIu32 ", keys used: %" PRIu32 " (max age %" PRIu32 " sec.)\n"
 		"time inactive/active: %s/%s\n"
-		"data rx/tx: %" PRIu32 "/%" PRIu32 "\n"
+		"data bytes rx/tx: %" PRIu32 "/%" PRIu32 "\n"
+		"packets rx/tx: %" PRIu32 "/%" PRIu32 "\n"
+		"late rx packets: %" PRIu32 "\n"
 		"bad nonces: %" PRIu32 "\n"
 		"nonces since reset: %" PRIu32 "\n"
 		"decrypt failures: %" PRIu32 "\n"
@@ -130,10 +132,12 @@ log_stats(struct vpn_state *vpn)
 			 sizeof(cur_inactive_str)),
 		time_str(cur_sess_active_secs, cur_sess_active_str,
 			 sizeof(cur_sess_active_str)),
-		vpn->rx_bytes, vpn->tx_bytes,
-		vpn->bad_nonces, vpn->nonce_incr_count, vpn->decrypt_failures,
-		vpn->peer_init_retransmits,
-	 vpn->key_switch_start_retransmits, vpn->key_switch_ack_retransmits,
+		vpn->rx_data_bytes, vpn->tx_data_bytes,
+		vpn->rx_packets, vpn->tx_packets,
+		vpn->rx_late_packets, vpn->bad_nonces,
+		vpn->nonce_incr_count, vpn->decrypt_failures,
+		vpn->peer_init_retransmits, vpn->key_switch_start_retransmits,
+		vpn->key_switch_ack_retransmits,
 		vpn->key_ready_retransmits,
 		(now.tv_sec - vpn->peer_last_heartbeat_ts.tv_sec));
 

@@ -602,7 +602,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				  EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
 				vpn->kev_change_count++;
 			}
-			vpn->rx_bytes = vpn->tx_bytes =
+			vpn->rx_data_bytes = vpn->rx_packets = vpn->rx_late_packets =
+				vpn->tx_data_bytes = vpn->tx_packets =
 				vpn->bad_nonces =
 				vpn->peer_init_retransmits =
 				vpn->key_switch_start_retransmits =
@@ -739,6 +740,7 @@ tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 			 VPN_STATE_STR(vpn->state), MSG_TYPE_STR(msg->type),
 				strerror(errno), errno);
 		} else {
+			vpn->tx_packets++;
 			vpn->key_sent_packet_count++;
 		}
 
@@ -959,7 +961,7 @@ process_key_ready(struct vpn_state *vpn, struct vpn_msg *msg)
 void
 process_debug_string(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 {
-	vpn->rx_bytes += data_len;
+	vpn->rx_data_bytes += data_len;
 
 	log_msg(vpn, LOG_NOTICE, "%3zu bytes: (%s) \"%s\"", data_len,
 		MSG_TYPE_STR(msg->type), msg->data);
@@ -981,7 +983,7 @@ process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 			log_msg(vpn, LOG_ERR, "%s: couldn't write to tunnel -- %s",
 				VPN_STATE_STR(vpn->state), strerror(errno));
 		else
-			vpn->rx_bytes += data_len;
+			vpn->rx_data_bytes += data_len;
 		break;
 	default:
 		log_invalid_msg_for_state(vpn, msg->type);
@@ -998,7 +1000,7 @@ ctrl_sock_input(struct vpn_state *vpn)
 	data_len = read(vpn->ctrl_sock, msg.data, sizeof(msg.data));
 	if (data_len >= 0) {
 		if (tx_encrypted(vpn, &msg, data_len))
-			vpn->tx_bytes += data_len;
+			vpn->tx_data_bytes += data_len;
 	} else {
 		log_msg(vpn, LOG_ERR, "%s: error reading from tunnel interface -- %s",
 			VPN_STATE_STR(vpn->state), strerror(errno));
@@ -1075,6 +1077,7 @@ ext_sock_input(struct vpn_state *vpn)
 		}
 	}
 	if (ok) {
+		vpn->rx_packets++;
 		data_len = ciphertext_len - crypto_box_MACBYTES - sizeof(msg.type);
 
 		if (msg.type != DATA)
@@ -1123,8 +1126,11 @@ stats_sock_input(struct vpn_state *vpn)
 			 "%s.vpnd.keys %" PRIu32 " %lld\n"
 			 "%s.vpnd.keys %" PRIu32 " %lld\n"
 			 "%s.vpnd.sessions %" PRIu32 " %lld\n"
-			 "%s.vpnd.rx %" PRIu32 " %lld\n"
-			 "%s.vpnd.tx %" PRIu32 " %lld\n"
+			 "%s.vpnd.rx.data_bytes %" PRIu32 " %lld\n"
+			 "%s.vpnd.tx.data_bytes %" PRIu32 " %lld\n"
+			 "%s.vpnd.rx.packets %" PRIu32 " %lld\n"
+			 "%s.vpnd.tx.packets %" PRIu32 " %lld\n"
+			 "%s.vpnd.rx.late %" PRIu32 " %lld\n"
 			 "%s.vpnd.bad_nonces %" PRIu32 " %lld\n"
 			 "%s.vpnd.peer_info_retransmits %" PRIu32 " %lld\n"
 		   "%s.vpnd.key_switch_start_retransmits %" PRIu32 " %lld\n"
@@ -1133,8 +1139,11 @@ stats_sock_input(struct vpn_state *vpn)
 			 vpn->stats_prefix, vpn->keys_used, now,
 			 vpn->stats_prefix, vpn->keys_used, now,
 			 vpn->stats_prefix, vpn->sess_starts, now,
-			 vpn->stats_prefix, vpn->rx_bytes, now,
-			 vpn->stats_prefix, vpn->tx_bytes, now,
+			 vpn->stats_prefix, vpn->rx_data_bytes, now,
+			 vpn->stats_prefix, vpn->tx_data_bytes, now,
+			 vpn->stats_prefix, vpn->rx_packets, now,
+			 vpn->stats_prefix, vpn->tx_packets, now,
+			 vpn->stats_prefix, vpn->rx_late_packets, now,
 			 vpn->stats_prefix, vpn->bad_nonces, now,
 			 vpn->stats_prefix, vpn->peer_init_retransmits, now,
 		  vpn->stats_prefix, vpn->key_switch_start_retransmits, now,
@@ -1171,7 +1180,7 @@ stdin_input(struct vpn_state *vpn)
 			*last_char = '\0';
 		data_len = strlen(tx_data) + sizeof(char);
 		if (tx_encrypted(vpn, &msg, data_len))
-			vpn->tx_bytes += data_len;
+			vpn->tx_data_bytes += data_len;
 	}
 
 }
