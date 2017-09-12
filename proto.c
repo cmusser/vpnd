@@ -1127,7 +1127,6 @@ stats_sock_input(struct vpn_state *vpn)
 		now = (long long)n;
 		snprintf(stats_buf, sizeof(stats_buf),
 			 "%s.vpnd.keys %" PRIu32 " %lld\n"
-			 "%s.vpnd.keys %" PRIu32 " %lld\n"
 			 "%s.vpnd.sessions %" PRIu32 " %lld\n"
 			 "%s.vpnd.rx.data_bytes %" PRIu32 " %lld\n"
 			 "%s.vpnd.tx.data_bytes %" PRIu32 " %lld\n"
@@ -1139,7 +1138,6 @@ stats_sock_input(struct vpn_state *vpn)
 		   "%s.vpnd.key_switch_start_retransmits %" PRIu32 " %lld\n"
 			 "%s.vpnd.key_ack_retransmits %" PRIu32 " %lld\n"
 			 "%s.vpnd.key_ready_retransmits %" PRIu32 " %lld\n",
-			 vpn->stats_prefix, vpn->keys_used, now,
 			 vpn->stats_prefix, vpn->keys_used, now,
 			 vpn->stats_prefix, vpn->sess_starts, now,
 			 vpn->stats_prefix, vpn->rx_data_bytes, now,
