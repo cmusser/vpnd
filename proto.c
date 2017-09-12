@@ -613,7 +613,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				vpn->sess_active_secs = vpn->inactive_secs =
 				vpn->decrypt_failures = 0;
 
-			vpn->peer_died = false;
+			vpn->shared_key_is_ephemeral = vpn->peer_died = false;
 			get_cur_monotonic(&vpn->sess_end_ts);
 
 			if (vpn->role == HOST_GW) {
@@ -648,6 +648,7 @@ return_to_init_state(struct vpn_state *vpn)
 {
 	memcpy(vpn->cur_shared_key, vpn->orig_shared_key,
 	       sizeof(vpn->cur_shared_key));
+	vpn->shared_key_is_ephemeral = false;
 	change_state(vpn, INIT);
 	manage_network_config(vpn);
 
@@ -678,10 +679,12 @@ change_state(struct vpn_state *vpn, vpn_state new_state)
 		tx_new_public_key(vpn);
 		break;
 	case MASTER_KEY_READY:
-		/* Nothing to do here */
+		vpn->shared_key_is_ephemeral = true;
 		break;
-	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
+		vpn->shared_key_is_ephemeral = true;
+		/* Fallthrough */
+	case ACTIVE_MASTER:
 		get_cur_monotonic(&vpn->key_start_ts);
 		vpn->key_sent_packet_count = 0;
 		vpn->keys_used++;

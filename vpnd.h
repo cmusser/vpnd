@@ -175,6 +175,7 @@ struct vpn_state {
 	char		resolvconf_path[256];
 	bool		already_ip_forwarding;
 	bool		already_ip6_forwarding;
+	bool		shared_key_is_ephemeral;
 	uint32_t	peer_id;
 	sa_family_t	remote_network_family;
 	uint8_t		remote_network_prefix_len;
