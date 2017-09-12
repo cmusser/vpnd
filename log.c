@@ -138,7 +138,7 @@ log_stats(struct vpn_state *vpn)
 		vpn->rx_packets, vpn->tx_packets,
 		vpn->rx_late_packets, vpn->bad_nonces,
 		vpn->nonce_incr_count, vpn->decrypt_failures,
-		vpn->peer_init_retransmits, vpn->key_switch_start_retransmits,
+	      vpn->peer_init_retransmits, vpn->key_switch_start_retransmits,
 		vpn->key_switch_ack_retransmits,
 		vpn->key_ready_retransmits,
 		(now.tv_sec - vpn->peer_last_heartbeat_ts.tv_sec));
@@ -146,10 +146,10 @@ log_stats(struct vpn_state *vpn)
 	log_msg(vpn, LOG_NOTICE, "--- vpnd nonces ---\n"
 		"TX nonce: %s\n"
 		"RX nonce: %s\n",
-	sodium_bin2hex(tx_nonce_str, sizeof(tx_nonce_str), vpn->nonce,
-		       crypto_box_NONCEBYTES),
-	      sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str), vpn->remote_nonce,
-			     crypto_box_NONCEBYTES));
+	      sodium_bin2hex(tx_nonce_str, sizeof(tx_nonce_str), vpn->nonce,
+			     crypto_box_NONCEBYTES),
+	sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str), vpn->remote_nonce,
+		       crypto_box_NONCEBYTES));
 
 	switch (vpn->role) {
 	case HOST:

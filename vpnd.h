@@ -16,6 +16,8 @@
 
 #include <sodium.h>
 
+#include "uthash.h"
+
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
 
 /* VPN process role */
@@ -150,6 +152,29 @@ extern const char *nonce_type_string_array[];
 	(((type) >= NONCE_TYPE_LAST_PLUS_ONE) \
 	    ? "UNKNOWN" : nonce_type_string_array[(type)])
 
+/* Nonce validity status */
+typedef enum {
+	NONCE_LATE,
+	NONCE_ALREADY_USED,
+	NONCE_NEW,
+	NONCE_STATUS_LAST_PLUS_ONE,
+}		nonce_status;
+
+#ifdef _DECL_STRINGS_
+const char     *nonce_status_string_array[NONCE_STATUS_LAST_PLUS_ONE] =
+{
+	"late",
+	"already used",
+	"new",
+};
+#else
+extern const char *nonce_status_string_array[];
+#endif
+
+#define NONCE_STATUS_STR(role) \
+	(((role) >= NONCE_STATUS_LAST_PLUS_ONE) \
+	    ? "UNKNOWN" : nonce_status_string_array[(role)])
+
 struct vpn_peer_info {
 	uint32_t	peer_id;
 	sa_family_t	host_addr_family;
@@ -161,6 +186,13 @@ struct vpn_peer_info {
 	unsigned char	remote_net[sizeof(struct in6_addr)];
 	unsigned char	resolv_addr[sizeof(struct in6_addr)];
 	char		resolv_domain[32];
+};
+
+struct late_nonce {
+	unsigned char	nonce[crypto_box_NONCEBYTES];	/* key */
+	uint32_t	use_count;	/* value (tracks how many times nonce
+					 * was received) */
+	UT_hash_handle	hh;	/* makes this structure hashable */
 };
 
 /* Finite state machine state data. */
@@ -203,6 +235,7 @@ struct vpn_state {
 	uint32_t	nonce_incr_count;
 	unsigned char	nonce_reset_incr_bin[crypto_box_NONCEBYTES];
 	unsigned char	remote_nonce[crypto_box_NONCEBYTES];
+	struct late_nonce *late_nonces;
 	int		ext_sock;
 	int		ctrl_sock;
 	int		stats_sock;

@@ -22,6 +22,7 @@
 #include "sodium.h"
 #include "log.h"
 #include "net.h"
+#include "nonce.h"
 #include "os.h"
 #include "proto.h"
 
@@ -614,6 +615,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				vpn->decrypt_failures = 0;
 
 			vpn->shared_key_is_ephemeral = vpn->peer_died = false;
+			vpn->late_nonces = NULL;
 			get_cur_monotonic(&vpn->sess_end_ts);
 
 			if (vpn->role == HOST_GW) {
@@ -680,9 +682,11 @@ change_state(struct vpn_state *vpn, vpn_state new_state)
 		break;
 	case MASTER_KEY_READY:
 		vpn->shared_key_is_ephemeral = true;
+		purge_late(vpn);
 		break;
 	case ACTIVE_SLAVE:
 		vpn->shared_key_is_ephemeral = true;
+		purge_late(vpn);
 		/* Fallthrough */
 	case ACTIVE_MASTER:
 		get_cur_monotonic(&vpn->key_start_ts);
@@ -1019,8 +1023,6 @@ ext_sock_input(struct vpn_state *vpn)
 	struct vpn_msg	msg;
 	size_t		rx_len , ciphertext_len;
 	unsigned char	rx_nonce[crypto_box_NONCEBYTES];
-	char		rx_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
-	char		remote_nonce_str[(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
 	struct msghdr	msghdr = {0};
 	struct sockaddr_storage peer_addr;
 	struct iovec	rx_iovec[2];
@@ -1058,16 +1060,7 @@ ext_sock_input(struct vpn_state *vpn)
 			 VPN_STATE_STR(vpn->state), strerror(errno), errno);
 	}
 	if (ok) {
-		if (sodium_compare(vpn->remote_nonce, rx_nonce, crypto_box_NONCEBYTES) > -1) {
-			ok = false;
-			vpn->bad_nonces++;
-			log_msg(vpn, LOG_ERR, "%s: received nonce (%s) <= previous (%s)",
-				VPN_STATE_STR(vpn->state),
-			  sodium_bin2hex(rx_nonce_str, sizeof(rx_nonce_str),
-					 rx_nonce, sizeof(rx_nonce)),
-				sodium_bin2hex(remote_nonce_str, sizeof(remote_nonce_str),
-			     vpn->remote_nonce, sizeof(vpn->remote_nonce)));
-		}
+		ok = check_nonce(vpn, rx_nonce);
 	}
 	if (ok) {
 		ciphertext_len = rx_len - sizeof(rx_nonce);
