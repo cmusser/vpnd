@@ -7,7 +7,6 @@
 #include "proto.h"
 
 #define VPND_CONF_FILENAME "/etc/vpnd.conf"
-#define VPND_VERSION "1.0.3"
 
 int
 main(int argc, char *argv[])

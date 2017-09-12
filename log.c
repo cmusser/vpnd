@@ -113,9 +113,10 @@ log_stats(struct vpn_state *vpn)
 	}
 
 	log_msg(vpn, LOG_NOTICE, "--- vpnd statistics ---\n"
+		"version: %s\n"
 		"%s is %s:\n"
 		"sessions: %" PRIu32 ", keys used: %" PRIu32 " (max age %" PRIu32 " sec.)\n"
-		"current key ephemeral: %s\n"
+		"current key: %s\n"
 		"time inactive/active: %s/%s\n"
 		"data bytes rx/tx: %" PRIu32 "/%" PRIu32 "\n"
 		"packets rx/tx: %" PRIu32 "/%" PRIu32 "\n"
@@ -126,10 +127,11 @@ log_stats(struct vpn_state *vpn)
 		"retransmits (pi/kss/ksa/kr): %" PRIu32
 		"/%" PRIu32 "/%" PRIu32 "/%" PRIu32 "\n"
 		"last peer message: %" PRIu32 " sec. ago\n",
+	    VPND_VERSION,
 		VPN_ROLE_STR(vpn->role),
 		VPN_STATE_STR(vpn->state),
 		vpn->sess_starts, vpn->keys_used, vpn->max_key_age_secs,
-		vpn->shared_key_is_ephemeral ? "yes" : "no",
+		vpn->shared_key_is_ephemeral ? "ephemeral" : "pre-shared",
 		time_str(cur_inactive_secs, cur_inactive_str,
 			 sizeof(cur_inactive_str)),
 		time_str(cur_sess_active_secs, cur_sess_active_str,
