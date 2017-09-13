@@ -10,6 +10,7 @@ struct vpn_msg {
 	unsigned char	data[DATA_SZ];
 };
 
+void		generate_peer_id(struct vpn_state *vpn);
 bool		init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config_fname);
 void		return_to_init_state(struct vpn_state *vpn);
 void		change_state(struct vpn_state *vpn, vpn_state new_state);
