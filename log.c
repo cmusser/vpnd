@@ -6,8 +6,8 @@
 #include <time.h>
 
 #include "log.h"
+#include "nonce.h"
 #include "os.h"
-
 
 char           *
 string_for_addr(sa_family_t af, void *addr, char *addr_str, size_t addr_str_sz)
@@ -121,6 +121,7 @@ log_stats(struct vpn_state *vpn)
 		"data bytes rx/tx: %" PRIu32 "/%" PRIu32 "\n"
 		"packets rx/tx: %" PRIu32 "/%" PRIu32 "\n"
 		"late rx packets: %" PRIu32 "\n"
+		"late rx packets (cur key): %" PRIu32 "\n"
 		"bad nonces: %" PRIu32 "\n"
 		"nonces since reset: %" PRIu32 "\n"
 		"decrypt failures: %" PRIu32 "\n"
@@ -138,7 +139,7 @@ log_stats(struct vpn_state *vpn)
 			 sizeof(cur_sess_active_str)),
 		vpn->rx_data_bytes, vpn->tx_data_bytes,
 		vpn->rx_packets, vpn->tx_packets,
-		vpn->rx_late_packets, vpn->bad_nonces,
+	    vpn->rx_late_packets, cur_key_late_packets(vpn), vpn->bad_nonces,
 		vpn->nonce_incr_count, vpn->decrypt_failures,
 	      vpn->peer_init_retransmits, vpn->key_switch_start_retransmits,
 		vpn->key_switch_ack_retransmits,

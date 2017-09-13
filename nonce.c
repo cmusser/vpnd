@@ -2,6 +2,12 @@
 #include "nonce.h"
 #include "uthash.h"
 
+uint32_t
+cur_key_late_packets(struct vpn_state *vpn)
+{
+	return HASH_COUNT(vpn->late_nonces);
+}
+
 bool
 check_nonce(struct vpn_state *vpn, unsigned char *nonce)
 {
