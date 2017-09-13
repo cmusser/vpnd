@@ -37,7 +37,7 @@ check_nonce(struct vpn_state *vpn, unsigned char *nonce)
 				if (late != NULL) {
 					ok = true;
 					vpn->rx_late_packets++;
-					found->use_count = 1;
+					late->use_count = 1;
 					HASH_ADD(hh, vpn->late_nonces, nonce, sizeof(struct late_nonce), late);
 				} else {
 					ok = false;
