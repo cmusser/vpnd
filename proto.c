@@ -547,6 +547,7 @@ stats_sock_input(struct vpn_state *vpn)
 			 "%s.vpnd.rx.late %" PRIu32 " %lld\n"
 			 "%s.vpnd.rx._cur_key_late %" PRIu32 " %lld\n"
 			 "%s.vpnd.bad_nonces %" PRIu32 " %lld\n"
+			 "%s.vpnd.decrypt_failures %" PRIu32 " %lld\n"
 			 "%s.vpnd.peer_info_retransmits %" PRIu32 " %lld\n"
 		   "%s.vpnd.key_switch_start_retransmits %" PRIu32 " %lld\n"
 			 "%s.vpnd.key_ack_retransmits %" PRIu32 " %lld\n"
@@ -560,6 +561,7 @@ stats_sock_input(struct vpn_state *vpn)
 			 vpn->stats_prefix, vpn->rx_late_packets, now,
 		    vpn->stats_prefix, cur_key_late_packets(vpn), now,
 			 vpn->stats_prefix, vpn->bad_nonces, now,
+			 vpn->stats_prefix, vpn->decrypt_failures, now,
 			 vpn->stats_prefix, vpn->peer_init_retransmits, now,
 		  vpn->stats_prefix, vpn->key_switch_start_retransmits, now,
 		    vpn->stats_prefix, vpn->key_switch_ack_retransmits, now,
