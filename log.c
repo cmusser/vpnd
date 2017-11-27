@@ -91,6 +91,13 @@ log_retransmit(struct vpn_state *vpn, message_type msg_type)
 }
 
 void
+log_skip_retransmit(struct vpn_state *vpn, uintptr_t timer_id)
+{
+	log_msg(vpn, LOG_INFO, "%s: not renewing %s", VPN_STATE_STR(vpn->state),
+		TIMER_TYPE_STR(timer_id));
+}
+
+void
 log_stats(struct vpn_state *vpn)
 {
 	struct timespec	now;
@@ -128,7 +135,7 @@ log_stats(struct vpn_state *vpn)
 		"retransmits (pi/kss/ksa/kr): %" PRIu32
 		"/%" PRIu32 "/%" PRIu32 "/%" PRIu32 "\n"
 		"last peer message: %" PRIu32 " sec. ago\n",
-	    VPND_VERSION,
+		VPND_VERSION,
 		VPN_ROLE_STR(vpn->role),
 		VPN_STATE_STR(vpn->state),
 		vpn->sess_starts, vpn->keys_used, vpn->max_key_age_secs,
@@ -139,7 +146,7 @@ log_stats(struct vpn_state *vpn)
 			 sizeof(cur_sess_active_str)),
 		vpn->rx_data_bytes, vpn->tx_data_bytes,
 		vpn->rx_packets, vpn->tx_packets,
-	    vpn->rx_late_packets, cur_key_late_packets(vpn), vpn->bad_nonces,
+	   vpn->rx_late_packets, cur_key_late_packets(vpn), vpn->bad_nonces,
 		vpn->nonce_incr_count, vpn->decrypt_failures,
 	      vpn->peer_init_retransmits, vpn->key_switch_start_retransmits,
 		vpn->key_switch_ack_retransmits,

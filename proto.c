@@ -636,17 +636,14 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 {
 	struct timespec	now;
 	time_t		inactive_secs, cur_key_age;
-	bool		peer_init_retransmit = false;
 	char		inactive_secs_str[32];
 	struct sockaddr_in null_addr = {0};
 
 	get_cur_monotonic(&now);
 
-	switch (kev->ident) {
-	case RETRANSMIT_PEER_INIT:
+	if (kev->ident == RETRANSMIT_PEER_INIT) {
 		if (vpn->state == INIT) {
-			switch (vpn->role) {
-			case HOST_GW:
+			if (vpn->role == HOST_GW) {
 				inactive_secs = now.tv_sec - vpn->sess_end_ts.tv_sec;
 				if (inactive_secs >= MAX_HOST_GW_INIT_SECS) {
 					log_msg(vpn, LOG_NOTICE, "%s: returning to %s "
@@ -662,43 +659,48 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 							 sizeof(null_addr));
 					change_state(vpn, HOST_WAIT);
 				} else {
-					peer_init_retransmit = true;
+					vpn->peer_init_retransmits++;
+					log_retransmit(vpn, PEER_INFO);
+					tx_peer_info(vpn);
 				}
-				break;
-			default:
-				peer_init_retransmit = true;
-				break;
+			} else {
+				vpn->peer_init_retransmits++;
+				log_retransmit(vpn, PEER_INFO);
+				tx_peer_info(vpn);
 			}
+		} else {
+			log_skip_retransmit(vpn, kev->ident);
 		}
-		if (peer_init_retransmit) {
-			vpn->peer_init_retransmits++;
-			log_retransmit(vpn, PEER_INFO);
-			tx_peer_info(vpn);
-		}
-		break;
-	case RETRANSMIT_KEY_SWITCH_START:
-		if (check_peer_alive(vpn, kev->ident, now) && vpn->state == MASTER_KEY_STALE) {
-			vpn->key_switch_start_retransmits++;
-			log_retransmit(vpn, KEY_SWITCH_START);
-			tx_new_public_key(vpn);
-		}
-		break;
-	case RETRANSMIT_KEY_SWITCH_ACK:
-		if (check_peer_alive(vpn, kev->ident, now) && vpn->state == SLAVE_KEY_SWITCHING) {
-			vpn->key_switch_ack_retransmits++;
-			log_retransmit(vpn, KEY_SWITCH_ACK);
-			tx_new_public_key(vpn);
-		}
-		break;
-	case RETRANSMIT_KEY_READY:
-		if (check_peer_alive(vpn, kev->ident, now) && vpn->state == MASTER_KEY_READY) {
-			vpn->key_ready_retransmits++;
-			log_retransmit(vpn, KEY_READY);
-			tx_key_ready(vpn);
-		}
-		break;
-	case ACTIVE_HEARTBEAT:
-		if (check_peer_alive(vpn, kev->ident, now)) {
+	} else if (check_peer_alive(vpn, kev->ident, now)) {
+		switch (kev->ident) {
+		case RETRANSMIT_KEY_SWITCH_START:
+			if (vpn->state == MASTER_KEY_STALE) {
+				vpn->key_switch_start_retransmits++;
+				log_retransmit(vpn, KEY_SWITCH_START);
+				tx_new_public_key(vpn);
+			} else {
+				log_skip_retransmit(vpn, kev->ident);
+			}
+			break;
+		case RETRANSMIT_KEY_SWITCH_ACK:
+			if (vpn->state == SLAVE_KEY_SWITCHING) {
+				vpn->key_switch_ack_retransmits++;
+				log_retransmit(vpn, KEY_SWITCH_ACK);
+				tx_new_public_key(vpn);
+			} else {
+				log_skip_retransmit(vpn, kev->ident);
+			}
+			break;
+		case RETRANSMIT_KEY_READY:
+			if (vpn->state == MASTER_KEY_READY) {
+				vpn->key_ready_retransmits++;
+				log_retransmit(vpn, KEY_READY);
+				tx_key_ready(vpn);
+			} else {
+				log_skip_retransmit(vpn, kev->ident);
+			}
+			break;
+		case ACTIVE_HEARTBEAT:
 			switch (vpn->state) {
 			case ACTIVE_MASTER:
 				tx_peer_info(vpn);
@@ -715,11 +717,10 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 			default:
 				break;
 			}
+			break;
+		default:
+			log_msg(vpn, LOG_ERR, "%s: unhandled timer id: %s",
+				VPN_STATE_STR(vpn->state), TIMER_TYPE_STR(kev->ident));
 		}
-		break;
-	default:
-		log_msg(vpn, LOG_ERR, "%s: unknown timer id: %u",
-			VPN_STATE_STR(vpn->state), kev->ident);
 	}
-
 }
