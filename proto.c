@@ -34,6 +34,7 @@ typedef enum {
 }		vpn_key_role;
 
 vpn_key_role	peer_id_compare(struct vpn_state *vpn);
+bool		check_peer_alive(struct vpn_state *vpn, uintptr_t timer_id, struct timespec now);
 
 
 void
@@ -559,7 +560,7 @@ stats_sock_input(struct vpn_state *vpn)
 			 vpn->stats_prefix, vpn->rx_packets, now,
 			 vpn->stats_prefix, vpn->tx_packets, now,
 			 vpn->stats_prefix, vpn->rx_late_packets, now,
-		    vpn->stats_prefix, cur_key_late_packets(vpn), now,
+			 vpn->stats_prefix, cur_key_late_packets(vpn), now,
 			 vpn->stats_prefix, vpn->bad_nonces, now,
 			 vpn->stats_prefix, vpn->decrypt_failures, now,
 			 vpn->stats_prefix, vpn->peer_init_retransmits, now,
@@ -603,7 +604,7 @@ stdin_input(struct vpn_state *vpn)
 }
 
 bool
-check_peer_alive(struct vpn_state *vpn, struct timespec now)
+check_peer_alive(struct vpn_state *vpn, uintptr_t timer_id, struct timespec now)
 {
 	time_t		cur_sess_active_secs;
 	char		cur_sess_active_str[32];
@@ -618,10 +619,11 @@ check_peer_alive(struct vpn_state *vpn, struct timespec now)
 			cur_sess_active_secs = vpn->sess_end_ts.tv_sec -
 				vpn->sess_start_ts.tv_sec;
 			vpn->sess_active_secs += cur_sess_active_secs;
-			log_msg(vpn, LOG_ERR, "%s: peer died after %s.",
+			log_msg(vpn, LOG_ERR, "%s: peer died after %s (checked before %s).",
 				VPN_STATE_STR(vpn->state),
 			 time_str(cur_sess_active_secs, cur_sess_active_str,
-				  sizeof(cur_sess_active_str)));
+				  sizeof(cur_sess_active_str)),
+				TIMER_TYPE_STR(timer_id));
 		}
 		/* Always return to init if dead */
 		return_to_init_state(vpn);
@@ -675,28 +677,28 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 		}
 		break;
 	case RETRANSMIT_KEY_SWITCH_START:
-		if (check_peer_alive(vpn, now) && vpn->state == MASTER_KEY_STALE) {
+		if (check_peer_alive(vpn, kev->ident, now) && vpn->state == MASTER_KEY_STALE) {
 			vpn->key_switch_start_retransmits++;
 			log_retransmit(vpn, KEY_SWITCH_START);
 			tx_new_public_key(vpn);
 		}
 		break;
 	case RETRANSMIT_KEY_SWITCH_ACK:
-		if (check_peer_alive(vpn, now) && vpn->state == SLAVE_KEY_SWITCHING) {
+		if (check_peer_alive(vpn, kev->ident, now) && vpn->state == SLAVE_KEY_SWITCHING) {
 			vpn->key_switch_ack_retransmits++;
 			log_retransmit(vpn, KEY_SWITCH_ACK);
 			tx_new_public_key(vpn);
 		}
 		break;
 	case RETRANSMIT_KEY_READY:
-		if (check_peer_alive(vpn, now) && vpn->state == MASTER_KEY_READY) {
+		if (check_peer_alive(vpn, kev->ident, now) && vpn->state == MASTER_KEY_READY) {
 			vpn->key_ready_retransmits++;
 			log_retransmit(vpn, KEY_READY);
 			tx_key_ready(vpn);
 		}
 		break;
 	case ACTIVE_HEARTBEAT:
-		if (check_peer_alive(vpn, now)) {
+		if (check_peer_alive(vpn, kev->ident, now)) {
 			switch (vpn->state) {
 			case ACTIVE_MASTER:
 				tx_peer_info(vpn);
