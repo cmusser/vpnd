@@ -1,5 +1,5 @@
-#ifndef _VPND_LOG_H_
-#define _VPND_LOG_H_
+#ifndef _VPND_DIAG_H_
+#define _VPND_DIAG_H_
 
 #include <syslog.h>
 #include <time.h>
@@ -13,5 +13,6 @@ void		log_nonce (struct vpn_state *vpn, char *prefix, unsigned char *nonce);
 void		log_retransmit(struct vpn_state *vpn, message_type msg_type);
 void		log_skip_retransmit(struct vpn_state *vpn, uintptr_t timer_id);
 void		log_stats (struct vpn_state *vpn);
+void		tx_graphite_stats(struct vpn_state *vpn, int client_fd);
 
-#endif				/* !_VPND_LOG_H_ */
+#endif				/* !_VPND_DIAG_H_ */

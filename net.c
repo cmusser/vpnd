@@ -14,7 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "log.h"
+#include "diag.h"
 #include "net.h"
 #include "os.h"
 

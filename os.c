@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "log.h"
+#include "diag.h"
 #include "proto.h"
 
 bool

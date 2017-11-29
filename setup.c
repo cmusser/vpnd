@@ -24,7 +24,7 @@
 #include <unistd.h>
 
 //#include "sodium.h"
-#include "log.h"
+#include "diag.h"
 #include "net.h"
 #include "os.h"
 #include "proto.h"

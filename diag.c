@@ -5,7 +5,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "log.h"
+#include "diag.h"
 #include "nonce.h"
 #include "os.h"
 
@@ -203,5 +203,47 @@ log_stats(struct vpn_state *vpn)
 	default:
 		break;
 	}
+
+}
+
+void
+tx_graphite_stats(struct vpn_state *vpn, int client_fd)
+{
+	time_t		n;
+	long long	now;
+	char		stats_buf [1024];
+
+	time(&n);
+	now = (long long)n;
+	snprintf(stats_buf, sizeof(stats_buf),
+	    "%s.vpnd.keys %" PRIu32 " %lld\n"
+	    "%s.vpnd.sessions %" PRIu32 " %lld\n"
+	    "%s.vpnd.rx.data_bytes %" PRIu32 " %lld\n"
+	    "%s.vpnd.tx.data_bytes %" PRIu32 " %lld\n"
+	    "%s.vpnd.rx.packets %" PRIu32 " %lld\n"
+	    "%s.vpnd.tx.packets %" PRIu32 " %lld\n"
+	    "%s.vpnd.rx.late %" PRIu32 " %lld\n"
+	    "%s.vpnd.rx._cur_key_late %" PRIu32 " %lld\n"
+	    "%s.vpnd.bad_nonces %" PRIu32 " %lld\n"
+	    "%s.vpnd.decrypt_failures %" PRIu32 " %lld\n"
+	    "%s.vpnd.peer_info_retransmits %" PRIu32 " %lld\n"
+	    "%s.vpnd.key_switch_start_retransmits %" PRIu32 " %lld\n"
+	    "%s.vpnd.key_ack_retransmits %" PRIu32 " %lld\n"
+	    "%s.vpnd.key_ready_retransmits %" PRIu32 " %lld\n",
+	    vpn->stats_prefix, vpn->keys_used, now,
+	    vpn->stats_prefix, vpn->sess_starts, now,
+	    vpn->stats_prefix, vpn->rx_data_bytes, now,
+	    vpn->stats_prefix, vpn->tx_data_bytes, now,
+	    vpn->stats_prefix, vpn->rx_packets, now,
+	    vpn->stats_prefix, vpn->tx_packets, now,
+	    vpn->stats_prefix, vpn->rx_late_packets, now,
+	    vpn->stats_prefix, cur_key_late_packets(vpn), now,
+	    vpn->stats_prefix, vpn->bad_nonces, now,
+	    vpn->stats_prefix, vpn->decrypt_failures, now,
+	    vpn->stats_prefix, vpn->peer_init_retransmits, now,
+	    vpn->stats_prefix, vpn->key_switch_start_retransmits, now,
+	    vpn->stats_prefix, vpn->key_switch_ack_retransmits, now,
+	    vpn->stats_prefix, vpn->key_ready_retransmits, now);
+	write(client_fd, stats_buf, strlen(stats_buf));
 
 }

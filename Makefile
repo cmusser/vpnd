@@ -4,7 +4,7 @@ PREFIX?=/usr/local
 
 all: vpnd vpnd-keygen
 
-vpnd: log.c net.c nonce.c os.c proto.c setup.c vpnd.c
+vpnd: diag.c net.c nonce.c os.c proto.c setup.c vpnd.c
 	${CC} ${CFLAGS} -o $@ $>
 
 vpnd-keygen: vpnd-keygen.c

@@ -1,4 +1,4 @@
-#include "log.h"
+#include "diag.h"
 #include "nonce.h"
 #include "uthash.h"
 
