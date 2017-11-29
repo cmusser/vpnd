@@ -232,3 +232,6 @@ or
 ## Protocol Details
 
 The `vpnd` network protocol is [explained in detail here](docs/protocol.md) 
+
+Nonces are an important part of the system, so a [discussion of how `vpnd`
+handles them](docs/nonces.md) is also available.

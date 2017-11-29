@@ -36,7 +36,7 @@ largest.
    peer is to initiate periodic key regeneration. It uses the local
    private key and remote public key that appear in the configuration
    file to generate the initial shared key.
-   
+
 2. If a `vpnd` is configured as a HOST_GW, i.e. servicing a specific
    client, its initial state is `HOST_WAIT`. It passively listens for
    the initial `PEER_INFO` message from the peer. It gets the peer's
