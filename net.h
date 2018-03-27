@@ -17,13 +17,6 @@ char           *format_ethaddr(struct ether_addr *addr, char *str);
 char           *format_sockaddr(struct sockaddr *sa, char *str, size_t str_sz);
 bool		get_sockaddr(struct vpn_state *vpn, struct addrinfo **addrinfo_p, char *host, char *port_str, bool passive);
 sa_family_t	inet_pton_any(struct vpn_state *vpn, const char *src, void *dst);
-void		manage_resolver(struct vpn_state *vpn);
-void		manage_host_ptp_addrs(struct vpn_state *vpn);
-void		manage_host_gw_ptp_addrs(struct vpn_state *vpn);
-void		manage_host_route_to_remote_net(struct vpn_state *vpn);
-void		manage_net_gw_tun_intf(struct vpn_state *vpn);
-void		manage_net_gw_remote_route(struct vpn_state *vpn);
-void		manage_forwarding(struct vpn_state *vpn);
 void		manage_network_config(struct vpn_state *vpn);
 bool		manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, socklen_t remote_addr_len);
 
