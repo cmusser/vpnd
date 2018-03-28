@@ -808,14 +808,14 @@ manage_host_gw_networking(struct vpn_state *vpn)
 	switch (vpn->state) {
 	case INIT:
 		if (!vpn->already_ip_forwarding)
-			set_sysctl_bool(vpn, SYS_IP_FORWARDING, false);
+			set_forwarding(vpn, AF_INET, false);
 		if (!vpn->already_ip6_forwarding)
-			set_sysctl_bool(vpn, SYS_IP6_FORWARDING, false);
+			set_forwarding(vpn, AF_INET6, false);
 		break;
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
-		set_sysctl_bool(vpn, SYS_IP_FORWARDING, true);
-		set_sysctl_bool(vpn, SYS_IP6_FORWARDING, true);
+		set_forwarding(vpn, AF_INET, true);
+		set_forwarding(vpn, AF_INET6, true);
 		set_tun_addrs(vpn, host_addr_str, HOST_REMOTE);
 		break;
 	default:
@@ -838,9 +838,9 @@ manage_net_gw_networking(struct vpn_state *vpn)
 	switch (vpn->state) {
 	case INIT:
 		if (!vpn->already_ip_forwarding)
-			set_sysctl_bool(vpn, SYS_IP_FORWARDING, false);
+			set_forwarding(vpn, AF_INET, false);
 		if (!vpn->already_ip6_forwarding)
-			set_sysctl_bool(vpn, SYS_IP6_FORWARDING, false);
+			set_forwarding(vpn, AF_INET6, false);
 
 		set_tun_state(vpn, DOWN);
 		configure_route_on_net_gw(vpn, remote_network_str, DELETE);
@@ -848,9 +848,8 @@ manage_net_gw_networking(struct vpn_state *vpn)
 
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
-		set_sysctl_bool(vpn, SYS_IP_FORWARDING, true);
-		set_sysctl_bool(vpn, SYS_IP6_FORWARDING, true);
-
+		set_forwarding(vpn, AF_INET, true);
+		set_forwarding(vpn, AF_INET6, true);
 		set_tun_state(vpn, UP);
 		configure_route_on_net_gw(vpn, remote_network_str, ADD);
 		break;

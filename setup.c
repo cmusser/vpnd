@@ -169,8 +169,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 			setlogmask(LOG_UPTO(vpn->log_upto));
 	}
 
-	vpn->already_ip_forwarding = get_sysctl_bool(vpn, SYS_IP_FORWARDING);
-	vpn->already_ip6_forwarding = get_sysctl_bool(vpn, SYS_IP6_FORWARDING);
+	vpn->already_ip_forwarding = get_forwarding(vpn, AF_INET);
+	vpn->already_ip6_forwarding = get_forwarding(vpn, AF_INET6);
 
 	config_file = fopen(config_fname, "r");
 	if (config_file != NULL) {

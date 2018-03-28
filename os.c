@@ -59,11 +59,25 @@ open_tun_sock(struct vpn_state *vpn, char *tun_dev_str)
 }
 
 bool
-get_sysctl_bool(struct vpn_state *vpn, char *name)
+get_forwarding(struct vpn_state *vpn, sa_family_t addr_family)
 {
 	bool		flag_bool = false;
+	char		*name;
 	uint32_t	flag;
 	size_t		flag_sz = sizeof(flag);
+
+	switch (addr_family) {
+	case AF_INET:
+		name = "net.inet.ip.forwarding";
+		break;
+	case AF_INET6:
+		name = "net.inet6.ip6.forwarding";
+		break;
+	default:
+		name = "net.inet.ip.forwarding";
+		log_msg(vpn, LOG_WARNING, "unknown forwarding address family %d, "
+		    "defaulting to IPv4", addr_family);
+	}
 
 	if (sysctlbyname(name, &flag, &flag_sz, NULL, 0) == -1)
 		log_msg(vpn, LOG_ERR, "sysctl get %s: %s", name, strerror(errno));
@@ -74,9 +88,23 @@ get_sysctl_bool(struct vpn_state *vpn, char *name)
 }
 
 void
-set_sysctl_bool(struct vpn_state *vpn, char *name, bool value)
+set_forwarding(struct vpn_state *vpn, sa_family_t addr_family, bool value)
 {
 	uint32_t	flag;
+	char		*name;
+
+	switch (addr_family) {
+	case AF_INET:
+		name = "net.inet.ip.forwarding";
+		break;
+	case AF_INET6:
+		name = "net.inet6.ip6.forwarding";
+		break;
+	default:
+		log_msg(vpn, LOG_ERR, "unknown forwarding address family %d, "
+		    "ignoring request", addr_family);
+		return;
+	}
 
 	flag = (value == true) ? 1 : 0;
 
