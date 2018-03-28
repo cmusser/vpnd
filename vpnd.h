@@ -18,7 +18,7 @@
 
 #include "uthash.h"
 
-#define VPND_VERSION "1.1.2-b1"
+#define VPND_VERSION "1.1.2"
 
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
 
