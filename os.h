@@ -6,6 +6,7 @@
 #define SYS_IP_FORWARDING "net.inet.ip.forwarding"
 #define SYS_IP6_FORWARDING "net.inet6.ip6.forwarding"
 
+bool		open_tun_sock(struct vpn_state *vpn, char *tun_dev_str);
 bool		get_sysctl_bool(struct vpn_state *vpn, char *name);
 void		set_sysctl_bool(struct vpn_state *vpn, char *name, bool value);
 void		set_tun_addrs(struct vpn_state *vpn, char *host_addr_str, tun_addr_mode mode);

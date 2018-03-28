@@ -1,7 +1,17 @@
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/sysctl.h>
 
+#include <net/if.h>
+#ifdef __DragonFly__
+#include <net/tun/if_tun.h>
+#else
+#include <net/if_tun.h>
+#endif
+
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,6 +24,39 @@
 #include "proto.h"
 
 #define DUMMY_REMOTE_NET_ADDR "192.168.239.254"
+
+bool
+open_tun_sock(struct vpn_state *vpn, char *tun_dev_str)
+{
+	bool		ok = true;
+	int		ioctl_data;
+
+	vpn->ctrl_sock = open(tun_dev_str, O_RDWR);
+	if (vpn->ctrl_sock < 0) {
+		ok = false;
+		log_msg(vpn, LOG_ERR, "couldn't open tunnel: %s", strerror(errno));
+	}
+
+	if (ok) {
+		ioctl_data = IFF_POINTOPOINT;
+		if (ioctl(vpn->ctrl_sock, TUNSIFMODE, &ioctl_data) < 0) {
+			ok = false;
+			log_msg(vpn, LOG_ERR, "couldn't set tunnel in p-t-p mode: %s",
+			    strerror(errno));
+		}
+	}
+
+	if (ok) {
+		ioctl_data = 0;
+		if (ioctl(vpn->ctrl_sock, TUNSIFHEAD, &ioctl_data) < 0) {
+			ok = false;
+			log_msg(vpn, LOG_ERR, "couldn't set tunnel in link-layer mode: %s",
+			    strerror(errno));
+		}
+	}
+
+	return ok;
+}
 
 bool
 get_sysctl_bool(struct vpn_state *vpn, char *name)

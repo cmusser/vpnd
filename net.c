@@ -23,17 +23,6 @@
 #endif
 
 char           *
-format_ethaddr(struct ether_addr *addr, char *str)
-{
-#if defined(__DragonFly__) || defined(__FreeBSD__)
-	return ether_ntoa_r(addr, str);
-#else
-	strlcpy(str, ether_ntoa(addr), ETHER_ADDRSTRLEN);
-	return str;
-#endif
-}
-
-char           *
 format_sockaddr(struct sockaddr *sa, char *str, size_t str_sz)
 {
 	char		addr_str  [INET6_ADDRSTRLEN];

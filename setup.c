@@ -5,13 +5,6 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 
-#include <net/if.h>
-#ifdef __DragonFly__
-#include <net/tun/if_tun.h>
-#else
-#include <net/if_tun.h>
-#endif
-
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -145,7 +138,6 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 	struct addrinfo *local_addrinfo = NULL;
 	char		local_info[INET6_ADDRSTRLEN + 7];
 	struct addrinfo *remote_addrinfo = NULL;
-	int		ioctl_data;
 	struct sockaddr_un stats_addr;
 	char           *stats_path = "/var/run/vpnd_stats.sock";
 
@@ -448,28 +440,9 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		}
 		/* Set up control socket */
 		if (ok) {
-			vpn->ctrl_sock = open(tunnel_device, O_RDWR);
-			if (vpn->ctrl_sock < 0) {
-				ok = false;
-				log_msg(vpn, LOG_ERR, "couldn't open tunnel: %s", strerror(errno));
-			}
+			ok = open_tun_sock(vpn, tunnel_device);
 		}
-		if (ok) {
-			ioctl_data = IFF_POINTOPOINT;
-			if (ioctl(vpn->ctrl_sock, TUNSIFMODE, &ioctl_data) < 0) {
-				ok = false;
-				log_msg(vpn, LOG_ERR, "couldn't set tunnel in p-t-p mode: %s",
-					strerror(errno));
-			}
-		}
-		if (ok) {
-			ioctl_data = 0;
-			if (ioctl(vpn->ctrl_sock, TUNSIFHEAD, &ioctl_data) < 0) {
-				ok = false;
-				log_msg(vpn, LOG_ERR, "couldn't set tunnel in link-layer mode: %s",
-					strerror(errno));
-			}
-		}
+		
 		/* open stats socket */
 		if (ok) {
 			if ((vpn->stats_sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
