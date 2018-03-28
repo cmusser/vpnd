@@ -99,6 +99,7 @@ set_tun_addrs(struct vpn_state *vpn, char *host_addr_str, tun_addr_mode mode)
 	case HOST_REMOTE:
 		snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s %s %s",
 		    vpn->tun_name, DUMMY_REMOTE_NET_ADDR, host_addr_str);
+		break;
 	default:
 		log_msg(vpn, LOG_WARNING, "%s: %s tunnel addr mode (%d)",
 		    VPN_ROLE_STR(vpn->role), TUN_ADDR_MODE_STR(mode), mode);
