@@ -26,6 +26,7 @@
 //#include "sodium.h"
 #include "diag.h"
 #include "net.h"
+#include "nonce.h"
 #include "os.h"
 #include "proto.h"
 #include "setup.h"

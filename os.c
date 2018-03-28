@@ -9,88 +9,11 @@
 
 #include "diag.h"
 #include "net.h"
+#include "nonce.h"
 #include "os.h"
 #include "proto.h"
 
 #define DUMMY_REMOTE_NET_ADDR "192.168.239.254"
-
-bool
-read_nonce(struct vpn_state *vpn, nonce_type type)
-{
-	bool		ok = true;
-	char           *nonce_filename;
-	FILE           *f;
-	unsigned char  *nonce;
-
-	if (type == LOCAL) {
-		nonce_filename = vpn->local_nonce_filename;
-		nonce = vpn->nonce;
-	} else {
-		nonce_filename = vpn->remote_nonce_filename;
-		nonce = vpn->remote_nonce;
-	}
-
-	f = fopen(nonce_filename, "r");
-	if (f == NULL) {
-		ok = false;
-		log_msg(vpn, LOG_ERR, "failed to open nonce file %s: %s\n",
-			nonce_filename, strerror(errno));
-	}
-	if (ok) {
-		if (fread(nonce, crypto_box_NONCEBYTES, 1, f) < 1) {
-			ok = false;
-			log_msg(vpn, LOG_ERR, "Can't read nonce from %s: %s\n",
-				nonce_filename, strerror(errno));
-		}
-	}
-	if (f != NULL)
-		fclose(f);
-
-	return ok;
-}
-
-void
-write_nonce(struct vpn_state *vpn, nonce_type type)
-{
-	bool		ok = true;
-	unsigned char	output_nonce[crypto_box_NONCEBYTES];
-	char           *nonce_filename;
-	FILE           *f;
-	unsigned char  *input_nonce;
-
-	if (type == LOCAL) {
-		vpn->nonce_incr_count = 0;
-		nonce_filename = vpn->local_nonce_filename;
-		input_nonce = vpn->nonce;
-	} else {
-		nonce_filename = vpn->remote_nonce_filename;
-		input_nonce = vpn->remote_nonce;
-	}
-
-	f = fopen(nonce_filename, "w");
-	if (f == NULL) {
-		ok = false;
-		log_msg(vpn, LOG_ERR, "failed to open nonce file %s: %s\n",
-			nonce_filename, strerror(errno));
-	}
-	if (ok) {
-		memcpy(output_nonce, input_nonce, sizeof(output_nonce));
-		if (type == LOCAL) {
-			sodium_add(output_nonce, vpn->nonce_reset_incr_bin,
-				   sizeof(output_nonce));
-			log_nonce(vpn, "create nonce reset point", output_nonce);
-		} else {
-			log_nonce(vpn, "storing remote nonce", output_nonce);
-		}
-		if (fwrite(output_nonce, sizeof(output_nonce), 1, f) < 1) {
-			ok = false;
-			log_msg(vpn, LOG_ERR, "failed to write nonce to %s: %s\n",
-				nonce_filename, strerror(errno));
-		}
-	}
-	if (f != NULL)
-		fclose(f);
-}
 
 bool
 get_sysctl_bool(struct vpn_state *vpn, char *name)
