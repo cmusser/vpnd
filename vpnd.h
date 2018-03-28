@@ -177,6 +177,70 @@ extern const char *nonce_status_string_array[];
 	(((role) >= NONCE_STATUS_LAST_PLUS_ONE) \
 	    ? "UNKNOWN" : nonce_status_string_array[(role)])
 
+/* Tunnel host address mode */
+typedef enum {
+	HOST_LOCAL,
+	HOST_REMOTE,
+	TUN_ADDR_MODE_LAST_PLUS_ONE,
+}	tun_addr_mode;
+
+#ifdef _DECL_STRINGS_
+const char     *tun_addr_mode_string_array[TUN_ADDR_MODE_LAST_PLUS_ONE] =
+{
+	"local",
+	"remote",
+};
+#else
+extern const char *tun_addr_mode_string_array[];
+#endif
+
+#define TUN_ADDR_MODE_STR(role) \
+	(((mode) >= TUN_ADDR_MODE_LAST_PLUS_ONE) \
+	    ? "UNKNOWN" : tun_addr_mode_string_array[(mode)])
+
+/* Interface actions. */
+typedef enum {
+	UP,
+	DOWN,
+	INTF_ACTION_LAST_PLUS_ONE,
+}	intf_action;
+
+#ifdef _DECL_STRINGS_
+const char     *intf_action_string_array[INTF_ACTION_LAST_PLUS_ONE] =
+{
+	"up",
+	"down",
+};
+#else
+extern const char *intf_action_string_array[];
+#endif
+
+#define INTF_ACTION_STR(role)			 \
+	(((action) >= INTF_ACTION_LAST_PLUS_ONE) \
+	    ? "UNKNOWN" : intf_action_string_array[(action)])
+
+/* Route actions */
+typedef enum {
+	ADD,
+	DELETE,
+	ROUTE_ACTION_LAST_PLUS_ONE,
+}	route_action;
+
+#ifdef _DECL_STRINGS_
+const char     *route_action_string_array[ROUTE_ACTION_LAST_PLUS_ONE] =
+{
+	"add",
+	"delete",
+};
+#else
+extern const char *route_action_string_array[];
+#endif
+
+#define ROUTE_ACTION_STR(role)			 \
+	(((action) >= ROUTE_ACTION_LAST_PLUS_ONE) \
+	    ? "UNKNOWN" : route_action_string_array[(action)])
+
+
 struct vpn_peer_info {
 	uint32_t	peer_id;
 	sa_family_t	host_addr_family;

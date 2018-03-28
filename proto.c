@@ -26,6 +26,7 @@
 #define HEARTBEAT_INTERVAL (10 * 1000)
 #define KEY_SWITCH_RETRANS_INTERVAL (500)
 #define KEY_READY_RETRANS_INTERVAL (500)
+#define DUMMY_REMOTE_NET_ADDR "192.168.239.254"
 
 typedef enum {
 	MASTER,
@@ -35,6 +36,10 @@ typedef enum {
 
 vpn_key_role	peer_id_compare(struct vpn_state *vpn);
 bool		check_peer_alive(struct vpn_state *vpn, uintptr_t timer_id, struct timespec now);
+void		manage_host_networking(struct vpn_state *vpn);
+void		manage_host_gw_networking(struct vpn_state *vpn);
+void		manage_net_gw_networking(struct vpn_state *vpn);
+void		manage_network_config(struct vpn_state *vpn);
 
 
 void
@@ -688,5 +693,188 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 			log_msg(vpn, LOG_ERR, "%s: unhandled timer id: %s",
 				VPN_STATE_STR(vpn->state), TIMER_TYPE_STR(kev->ident));
 		}
+	}
+}
+
+void
+manage_host_networking(struct vpn_state *vpn)
+{
+	char		host_addr_str[INET6_ADDRSTRLEN];
+	char		net_addr_str[INET6_ADDRSTRLEN];
+	bool		ok = true;
+	bool		manage_resolver;
+	char		resolv_data_filename[512] = {'\0'};
+	int		resolv_data_fd;
+	char		resolv_data_str[256];
+	char		resolv_addr_str[INET6_ADDRSTRLEN];
+	char		resolvconf_cmd[512];
+	FILE           *cmd_fd;
+	char		cmd_out   [256];
+	char           *newline;
+
+	if (inet_ntop(vpn->rx_peer_info.host_addr_family, &vpn->rx_peer_info.host_addr,
+		      host_addr_str, sizeof(host_addr_str)) == NULL) {
+		log_msg(vpn, LOG_WARNING, "%s: host address on remote network unconfigured "
+			"or invalid", VPN_ROLE_STR(vpn->role));
+		return;
+	}
+	if (inet_ntop(vpn->rx_peer_info.remote_net_addr_family, vpn->rx_peer_info.remote_net,
+		      net_addr_str, sizeof(net_addr_str)) == NULL) {
+		log_msg(vpn, LOG_WARNING, "%s: remote network address unconfigured or invalid",
+			VPN_ROLE_STR(vpn->role));
+		return;
+	}
+	manage_resolver = (vpn->rx_peer_info.resolv_addr_family == AF_INET ||
+			   vpn->rx_peer_info.resolv_addr_family == AF_INET6);
+
+	switch (vpn->state) {
+	case INIT:
+		configure_route_on_host(vpn, net_addr_str, DELETE);
+		if (manage_resolver)
+			snprintf(resolvconf_cmd, sizeof(resolvconf_cmd), "%s -d %s 2>&1",
+				 vpn->resolvconf_path, vpn->tun_name);
+		break;
+
+	case ACTIVE_MASTER:
+	case ACTIVE_SLAVE:
+		set_tun_addrs(vpn, host_addr_str, HOST_LOCAL);
+		configure_route_on_host(vpn, net_addr_str, ADD);
+		if (manage_resolver) {
+			snprintf(resolv_data_filename, sizeof(resolv_data_filename),
+			       "/tmp/vpnd_resolv_%s.XXXXXX", vpn->tun_name);
+			resolv_data_fd = mkstemp(resolv_data_filename);
+			if (resolv_data_fd == -1) {
+				ok = false;
+				log_msg(vpn, LOG_ERR, "creating of resolvconf temp data failed -- %s",
+					strerror(errno));
+			}
+			if (ok) {
+				snprintf(resolv_data_str, sizeof(resolv_data_str), "nameserver %s\n",
+					 inet_ntop(vpn->rx_peer_info.resolv_addr_family,
+						   &vpn->rx_peer_info.resolv_addr, resolv_addr_str,
+						   sizeof(resolv_addr_str)));
+				write(resolv_data_fd, resolv_data_str, strlen(resolv_data_str));
+
+				if (strlen(vpn->rx_peer_info.resolv_domain) > 0) {
+					snprintf(resolv_data_str, sizeof(resolv_data_str), "domain %s\n",
+					   vpn->rx_peer_info.resolv_domain);
+					write(resolv_data_fd, resolv_data_str, strlen(resolv_data_str));
+				}
+				close(resolv_data_fd);
+				snprintf(resolvconf_cmd, sizeof(resolvconf_cmd), "%s -a %s < %s 2>&1",
+					 vpn->resolvconf_path, vpn->tun_name, resolv_data_filename);
+			}
+		}
+		break;
+
+	default:
+		ok = false;
+		log_msg(vpn, LOG_ERR, "cannot manage %s networking in %s state",
+			VPN_ROLE_STR(vpn->role), VPN_STATE_STR(vpn->state));
+	}
+
+	if (manage_resolver && ok) {
+		log_msg(vpn, LOG_NOTICE, "%s: %s", VPN_STATE_STR(vpn->state), resolvconf_cmd);
+		if ((cmd_fd = popen(resolvconf_cmd, "r")) == NULL) {
+			log_msg(vpn, LOG_ERR, "spawn of \"%s\" failed: %s", resolvconf_cmd,
+				strerror(errno));
+		} else {
+			while (fgets(cmd_out, sizeof(cmd_out), cmd_fd) != NULL) {
+				newline = strrchr(cmd_out, '\n');
+				if (newline)
+					*newline = '\0';
+				log_msg(vpn, LOG_NOTICE, "==> %s", cmd_out);
+			}
+
+			if (ferror(cmd_fd))
+				log_msg(vpn, LOG_ERR, "reading subprocess output: %s", strerror(errno));
+
+			pclose(cmd_fd);
+		}
+		unlink(resolv_data_filename);
+	}
+}
+
+void
+manage_host_gw_networking(struct vpn_state *vpn)
+{
+	char		host_addr_str[INET6_ADDRSTRLEN];
+
+	if (inet_ntop(vpn->tx_peer_info.host_addr_family, &vpn->tx_peer_info.host_addr,
+		      host_addr_str, sizeof(host_addr_str)) == NULL) {
+		log_msg(vpn, LOG_WARNING, "%s: client host address unconfigured or invalid",
+			VPN_ROLE_STR(vpn->role));
+		return;
+	}
+	switch (vpn->state) {
+	case INIT:
+		if (!vpn->already_ip_forwarding)
+			set_sysctl_bool(vpn, SYS_IP_FORWARDING, false);
+		if (!vpn->already_ip6_forwarding)
+			set_sysctl_bool(vpn, SYS_IP6_FORWARDING, false);
+		break;
+	case ACTIVE_MASTER:
+	case ACTIVE_SLAVE:
+		set_sysctl_bool(vpn, SYS_IP_FORWARDING, true);
+		set_sysctl_bool(vpn, SYS_IP6_FORWARDING, true);
+		set_tun_addrs(vpn, host_addr_str, HOST_REMOTE);
+		break;
+	default:
+		log_msg(vpn, LOG_ERR, "cannot manage %s networking in %s state",
+			VPN_ROLE_STR(vpn->role), VPN_STATE_STR(vpn->state));
+	}
+}
+
+void
+manage_net_gw_networking(struct vpn_state *vpn)
+{
+	char		remote_network_str[INET6_ADDRSTRLEN];
+
+	if (inet_ntop(vpn->remote_network_family, vpn->remote_network, remote_network_str,
+		      sizeof(remote_network_str)) == NULL) {
+		log_msg(vpn, LOG_WARNING, "%s: remote network address unconfigured or invalid",
+			VPN_ROLE_STR(vpn->role));
+		return;
+	}
+	switch (vpn->state) {
+	case INIT:
+		if (!vpn->already_ip_forwarding)
+			set_sysctl_bool(vpn, SYS_IP_FORWARDING, false);
+		if (!vpn->already_ip6_forwarding)
+			set_sysctl_bool(vpn, SYS_IP6_FORWARDING, false);
+
+		set_tun_state(vpn, DOWN);
+		configure_route_on_net_gw(vpn, remote_network_str, DELETE);
+		break;
+
+	case ACTIVE_MASTER:
+	case ACTIVE_SLAVE:
+		set_sysctl_bool(vpn, SYS_IP_FORWARDING, true);
+		set_sysctl_bool(vpn, SYS_IP6_FORWARDING, true);
+
+		set_tun_state(vpn, UP);
+		configure_route_on_net_gw(vpn, remote_network_str, ADD);
+		break;
+
+	default:
+		log_msg(vpn, LOG_ERR, "cannot manage %s networking in %s state",
+			VPN_ROLE_STR(vpn->role), VPN_STATE_STR(vpn->state));
+	}
+}
+
+void
+manage_network_config(struct vpn_state *vpn)
+{
+	switch (vpn->role) {
+	case HOST:
+		manage_host_networking(vpn);
+		break;
+	case HOST_GW:
+		manage_host_gw_networking(vpn);
+		break;
+	case NET_GW:
+		manage_net_gw_networking(vpn);
+	default:
+		break;
 	}
 }
