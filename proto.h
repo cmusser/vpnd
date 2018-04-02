@@ -29,7 +29,7 @@ void		ext_sock_input(struct vpn_state *vpn);
 void		ctrl_sock_input(struct vpn_state *vpn);
 void		stats_sock_input(struct vpn_state *vpn);
 void		stdin_input(struct vpn_state *vpn);
-void		process_timeout(struct vpn_state *vpn, struct kevent *kev);
+void		process_timeout(struct vpn_state *vpn, uintptr_t timer_id);
 
 
 #endif				/* !_VPND_PROTO_H_ */

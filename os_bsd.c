@@ -314,7 +314,7 @@ run(struct vpn_state *vpn)
 						stdin_input(vpn);
 					break;
 				case EVFILT_TIMER:
-					process_timeout(vpn, &event);
+					process_timeout(vpn, event.ident);
 					break;
 				case EVFILT_SIGNAL:
 					switch (event.ident) {

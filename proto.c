@@ -602,7 +602,7 @@ check_peer_alive(struct vpn_state *vpn, uintptr_t timer_id, struct timespec now)
 }
 
 void
-process_timeout(struct vpn_state *vpn, struct kevent *kev)
+process_timeout(struct vpn_state *vpn, uintptr_t timer_id)
 {
 	struct timespec	now;
 	time_t		inactive_secs, cur_key_age;
@@ -611,7 +611,7 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 
 	get_cur_monotonic(&now);
 
-	if (kev->ident == RETRANSMIT_PEER_INIT) {
+	if (timer_id == RETRANSMIT_PEER_INIT) {
 		if (vpn->state == INIT) {
 			if (vpn->role == HOST_GW) {
 				inactive_secs = now.tv_sec - vpn->sess_end_ts.tv_sec;
@@ -639,17 +639,17 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 				tx_peer_info(vpn);
 			}
 		} else {
-			log_skip_retransmit(vpn, kev->ident);
+			log_skip_retransmit(vpn, timer_id);
 		}
-	} else if (check_peer_alive(vpn, kev->ident, now)) {
-		switch (kev->ident) {
+	} else if (check_peer_alive(vpn, timer_id, now)) {
+		switch (timer_id) {
 		case RETRANSMIT_KEY_SWITCH_START:
 			if (vpn->state == MASTER_KEY_STALE) {
 				vpn->key_switch_start_retransmits++;
 				log_retransmit(vpn, KEY_SWITCH_START);
 				tx_new_public_key(vpn);
 			} else {
-				log_skip_retransmit(vpn, kev->ident);
+				log_skip_retransmit(vpn, timer_id);
 			}
 			break;
 		case RETRANSMIT_KEY_SWITCH_ACK:
@@ -658,7 +658,7 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 				log_retransmit(vpn, KEY_SWITCH_ACK);
 				tx_new_public_key(vpn);
 			} else {
-				log_skip_retransmit(vpn, kev->ident);
+				log_skip_retransmit(vpn, timer_id);
 			}
 			break;
 		case RETRANSMIT_KEY_READY:
@@ -667,7 +667,7 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 				log_retransmit(vpn, KEY_READY);
 				tx_key_ready(vpn);
 			} else {
-				log_skip_retransmit(vpn, kev->ident);
+				log_skip_retransmit(vpn, timer_id);
 			}
 			break;
 		case ACTIVE_HEARTBEAT:
@@ -690,7 +690,7 @@ process_timeout(struct vpn_state *vpn, struct kevent *kev)
 			break;
 		default:
 			log_msg(vpn, LOG_ERR, "%s: unhandled timer id: %s",
-				VPN_STATE_STR(vpn->state), TIMER_TYPE_STR(kev->ident));
+				VPN_STATE_STR(vpn->state), TIMER_TYPE_STR(timer_id));
 		}
 	}
 }

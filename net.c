@@ -18,10 +18,6 @@
 #include "net.h"
 #include "os.h"
 
-#ifndef ETHER_ADDRSTRLEN
-#define ETHER_ADDRSTRLEN 17
-#endif
-
 char           *
 format_sockaddr(struct sockaddr *sa, char *str, size_t str_sz)
 {
