@@ -15,8 +15,7 @@
 #include <unistd.h>
 
 #include "diag.h"
-#include "net.h"
-#include "os.h"
+#include "util.h"
 
 char           *
 format_sockaddr(struct sockaddr *sa, char *str, size_t str_sz)

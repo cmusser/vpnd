@@ -18,10 +18,10 @@
 #include <string.h>
 
 #include "diag.h"
-#include "net.h"
 #include "nonce.h"
 #include "os.h"
 #include "proto.h"
+#include "util.h"
 
 #define DUMMY_REMOTE_NET_ADDR "192.168.239.254"
 

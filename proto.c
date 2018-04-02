@@ -15,10 +15,10 @@
 
 #include "sodium.h"
 #include "diag.h"
-#include "net.h"
 #include "nonce.h"
 #include "os.h"
 #include "proto.h"
+#include "util.h"
 
 #define PEER_MAX_HEARTBEAT_INTERVAL_SECS 20
 #define MAX_HOST_GW_INIT_SECS 120

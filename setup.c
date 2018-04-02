@@ -18,11 +18,11 @@
 
 //#include "sodium.h"
 #include "diag.h"
-#include "net.h"
 #include "nonce.h"
 #include "os.h"
 #include "proto.h"
 #include "setup.h"
+#include "util.h"
 
 #define DEFAULT_VPND_PORT "4706"
 
