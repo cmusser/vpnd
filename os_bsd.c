@@ -234,35 +234,6 @@ get_cur_monotonic(struct timespec *tp)
 }
 
 void
-spawn_subprocess(struct vpn_state *vpn, char *cmd)
-{
-	char		cmd_with_stderr_redirect[512];
-	FILE           *cmd_fd;
-	char		cmd_out   [256];
-	char           *newline;
-
-	snprintf(cmd_with_stderr_redirect, sizeof(cmd_with_stderr_redirect),
-		 "%s 2>&1", cmd);
-	if ((cmd_fd = popen(cmd_with_stderr_redirect, "r")) == NULL) {
-		log_msg(vpn, LOG_ERR, "spawn of \"%s\" failed: %s", cmd_with_stderr_redirect,
-			strerror(errno));
-	} else {
-
-		while (fgets(cmd_out, sizeof(cmd_out), cmd_fd) != NULL) {
-			newline = strrchr(cmd_out, '\n');
-			if (newline)
-				*newline = '\0';
-			log_msg(vpn, LOG_NOTICE, "==> %s", cmd_out);
-		}
-
-		if (ferror(cmd_fd))
-			log_msg(vpn, LOG_ERR, "reading subprocess output: %s", strerror(errno));
-
-		pclose(cmd_fd);
-	}
-}
-
-void
 add_timer(struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval)
 {
 	if (vpn->kev_change_count < COUNT_OF(vpn->kev_changes)) {
