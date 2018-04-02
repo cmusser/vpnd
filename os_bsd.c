@@ -58,6 +58,38 @@ open_tun_sock(struct vpn_state *vpn, char *tun_dev_str)
 	return ok;
 }
 
+void
+init_event_processing(struct vpn_state *vpn, bool stdin_events)
+{
+	EV_SET(&vpn->kev_changes[0], vpn->ext_sock,
+	    EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
+	vpn->kev_change_count = 1;
+	EV_SET(&vpn->kev_changes[1], vpn->ctrl_sock,
+	    EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
+	vpn->kev_change_count++;
+	EV_SET(&vpn->kev_changes[2], vpn->stats_sock,
+	    EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
+	vpn->kev_change_count++;
+	EV_SET(&vpn->kev_changes[3], SIGUSR1,
+	    EVFILT_SIGNAL, EV_ADD | EV_ENABLE, 0, 0, 0);
+	vpn->kev_change_count++;
+	signal(SIGUSR1, SIG_IGN);
+	EV_SET(&vpn->kev_changes[4], SIGINT,
+	    EVFILT_SIGNAL, EV_ADD | EV_ENABLE, 0, 0, 0);
+	vpn->kev_change_count++;
+	signal(SIGINT, SIG_IGN);
+	EV_SET(&vpn->kev_changes[5], SIGTERM,
+	    EVFILT_SIGNAL, EV_ADD | EV_ENABLE, 0, 0, 0);
+	vpn->kev_change_count++;
+	signal(SIGTERM, SIG_IGN);
+
+	if (stdin_events) {
+		EV_SET(&vpn->kev_changes[6], STDIN_FILENO,
+		    EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
+		vpn->kev_change_count++;
+	}
+}
+
 bool
 get_forwarding(struct vpn_state *vpn, sa_family_t addr_family)
 {
