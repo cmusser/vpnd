@@ -14,7 +14,4 @@ void		configure_route_on_host(struct vpn_state *vpn, char *net_addr_str, route_a
 void		get_cur_monotonic(struct timespec *tp);
 void		add_timer (struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval);
 bool		run       (struct vpn_state *vpn);
-#if defined(__NetBSD__) || defined(__MacOSX__)
-long long	strtonum(const char *nptr, long long minval, long long maxval, const char **errstr);
-#endif
 #endif				/* !_VPND_OS_H_ */
