@@ -211,7 +211,7 @@ tx_graphite_stats(struct vpn_state *vpn, int client_fd)
 {
 	time_t		n;
 	long long	now;
-	char		stats_buf [1024];
+	char		stats_buf [2048];
 
 	time(&n);
 	now = (long long)n;
