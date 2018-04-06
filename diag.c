@@ -8,6 +8,7 @@
 #include "diag.h"
 #include "nonce.h"
 #include "os.h"
+#include "util.h"
 
 char           *
 string_for_addr(sa_family_t af, void *addr, char *addr_str, size_t addr_str_sz)

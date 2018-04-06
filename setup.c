@@ -1,4 +1,8 @@
+#ifdef __linux__
+#include <endian.h>
+#else
 #include <sys/endian.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>

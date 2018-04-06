@@ -13,8 +13,12 @@ bool		get_sockaddr(struct vpn_state *vpn, struct addrinfo **addrinfo_p, char *ho
 sa_family_t	inet_pton_any(struct vpn_state *vpn, const char *src, void *dst);
 bool		manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, socklen_t remote_addr_len);
 void		spawn_subprocess(struct vpn_state *vpn, char *cmd);
-#if defined(__NetBSD__) || defined(__MacOSX__)
+#if defined(__NetBSD__) || defined(__MacOSX__) || defined(__linux__)
 long long	strtonum(const char *nptr, long long minval, long long maxval, const char **errstr);
+#endif
+
+#ifdef __linux__
+size_t		strlcpy(char *dst, const char *src, size_t siz);
 #endif
 
 #endif				/* !_VPND_NET_H_ */

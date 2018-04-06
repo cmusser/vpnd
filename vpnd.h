@@ -3,7 +3,9 @@
 
 #include <sys/socket.h>
 #include <sys/types.h>
+#ifndef __linux__
 #include <sys/event.h>
+#endif
 #include <sys/un.h>
 
 #include <arpa/inet.h>
@@ -305,8 +307,12 @@ struct vpn_state {
 	int		ext_sock;
 	int		ctrl_sock;
 	int		stats_sock;
+#ifdef __linux__
+	int		epollfd;
+#else
 	struct kevent	kev_changes[8];
 	uint32_t	kev_change_count;
+#endif
 	uint32_t	rx_data_bytes;
 	uint32_t	rx_packets;
 	uint32_t	rx_late_packets;
