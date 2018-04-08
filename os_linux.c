@@ -38,6 +38,36 @@ bool
 get_forwarding(struct vpn_state *vpn, sa_family_t addr_family)
 {
 	bool		flag_bool = false;
+	char		*name;
+	FILE		*forwarding;
+	char		forwarding_str;
+
+	switch (addr_family) {
+	case AF_INET:
+		name = "/proc/sys/net/ipv4/conf/all/forwarding";
+		break;
+	case AF_INET6:
+		name = "/proc/sys/net/ipv6/conf/all/forwarding";
+		break;
+	default:
+		name = "/proc/sys/net/ipv4/conf/all/forwarding";
+		log_msg(vpn, LOG_WARNING, "unknown forwarding address family %d, "
+		    "defaulting to IPv4", addr_family);
+	}
+
+	forwarding = fopen(name, "r");
+	if (forwarding == NULL) {
+		log_msg(vpn, LOG_ERR, "failed to open forwarding data at %s: %s\n",
+			name, strerror(errno));
+	} else {
+		if (fread(&forwarding_str, sizeof(forwarding_str), 1, forwarding) < 1)
+			log_msg(vpn, LOG_ERR, "Can't read forwarding data from %s: %s\n",
+				name, strerror(errno));
+		else
+			flag_bool = (strncmp(&forwarding_str, "0",
+				sizeof(forwarding_str)) == 0) ? false : true;
+	}
+	fclose(forwarding);
 
 	return flag_bool;
 }
@@ -45,6 +75,39 @@ get_forwarding(struct vpn_state *vpn, sa_family_t addr_family)
 void
 set_forwarding(struct vpn_state *vpn, sa_family_t addr_family, bool value)
 {
+	char		flag;
+	char		*name;
+	FILE		*forwarding;
+
+	switch (addr_family) {
+	case AF_INET:
+		name = "/proc/sys/net/ipv4/conf/all/forwarding";
+		break;
+	case AF_INET6:
+		name = "/proc/sys/net/ipv6/conf/all/forwarding";
+		break;
+	default:
+		log_msg(vpn, LOG_ERR, "unknown forwarding address family %d, "
+		    "ignoring request", addr_family);
+		return;
+	}
+
+	flag = (value == true) ? '1' : '0';
+
+	forwarding = fopen(name, "w");
+	if (forwarding == NULL) {
+		log_msg(vpn, LOG_ERR, "failed to open forwarding data at %s: %s\n",
+			name, strerror(errno));
+
+	} else {
+		if (fwrite(&flag, sizeof(flag), 1, forwarding) < 1)
+			log_msg(vpn, LOG_ERR, "Can't write forwarding data to %s: %s\n",
+				name, strerror(errno));
+		else
+			log_msg(vpn, LOG_NOTICE, "sysctl %s=%c", name, flag);
+		fclose(forwarding);
+	}
+
 }
 
 void
