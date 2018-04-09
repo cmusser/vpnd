@@ -94,7 +94,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		{"role", "role:", sizeof("role:"),
 		role, sizeof(role), "net-gw"},
 		{"tunnel device", "device:", sizeof("device:"),
-		tunnel_device, sizeof(tunnel_device), "/dev/tun0"},
+		tunnel_device, sizeof(tunnel_device), "tun0"},
 		{"stats prefix", "stats_prefix:", sizeof("stats_prefix:"),
 		vpn->stats_prefix, sizeof(vpn->stats_prefix), "<hostname>"},
 		{"local secret key", "local_sk:", sizeof("local_sk:"),
@@ -135,7 +135,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 	unsigned char	local_sk_bin[crypto_box_SECRETKEYBYTES];
 	unsigned char	remote_pk_bin[crypto_box_PUBLICKEYBYTES];
 	unsigned int	i , j;
-	char           *prefix_start, *tun_name_start;
+	char           *prefix_start;
 	long long	max_prefix_len;
 	const char     *errstr;
 	struct addrinfo *local_addrinfo = NULL;
@@ -359,16 +359,6 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				"\"net-gw\", \"host-gw\" or \"host\")\n");
 		}
 
-		if (ok) {
-			tun_name_start = strrchr(tunnel_device, '/');
-			if (tun_name_start == NULL) {
-				ok = false;
-				log_msg(vpn, LOG_ERR, "Couldn't locate tunnel device name");
-			} else {
-				tun_name_start++;
-				strlcpy(vpn->tun_name, tun_name_start, sizeof(vpn->tun_name));
-			}
-		}
 		if (ok) {
 			if (vpn->role != HOST_GW && strlen(remote_host) == 0) {
 				ok = false;

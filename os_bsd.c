@@ -1,4 +1,5 @@
 #include <sys/ioctl.h>
+#include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/sysctl.h>
@@ -26,11 +27,14 @@
 #define DUMMY_REMOTE_NET_ADDR "192.168.239.254"
 
 bool
-open_tun_sock(struct vpn_state *vpn, char *tun_dev_str)
+open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 {
 	bool		ok = true;
+	char		tun_dev_str[MAXPATHLEN];
 	int		ioctl_data;
 
+
+	snprintf(tun_dev_str, sizeof(tun_dev_str), "/dev/%s", tun_name_str);
 	vpn->ctrl_sock = open(tun_dev_str, O_RDWR);
 	if (vpn->ctrl_sock < 0) {
 		ok = false;
@@ -54,6 +58,9 @@ open_tun_sock(struct vpn_state *vpn, char *tun_dev_str)
 			    strerror(errno));
 		}
 	}
+
+	if (ok)
+		strlcpy(vpn->tun_name, tun_name_str, sizeof(vpn->tun_name));
 
 	return ok;
 }
