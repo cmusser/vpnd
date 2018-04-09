@@ -22,9 +22,32 @@
 #define DUMMY_REMOTE_NET_ADDR "192.168.239.254"
 
 bool
-open_tun_sock(struct vpn_state *vpn, char *tun_dev_str)
+open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 {
 	bool		ok = true;
+	struct ifreq	ifr;
+
+	vpn->ctrl_sock = open("/dev/net/tun", O_RDWR);
+
+	if (vpn->ctrl_sock < 0) {
+		ok = false;
+		log_msg(vpn, LOG_ERR, "couldn't open tunnel: %s", strerror(errno));
+	}
+
+	if (ok) {
+		bzero(&ifr, sizeof(ifr));
+		ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
+		strlcpy(ifr.ifr_name, tun_name_str, IFNAMSIZ);
+		if(ioctl(vpn->ctrl_sock, TUNSETIFF, (void *) &ifr) < 0 ) {
+			ok = false;
+			close(vpn->ctrl_sock);
+			log_msg(vpn, LOG_ERR, "couldn't configure tunnel: %s",
+			    strerror(errno));
+		}
+	}
+
+	if (ok)
+		 strlcpy(vpn->tun_name, ifr.ifr_name, sizeof(vpn->tun_name));
 
 	return ok;
 }

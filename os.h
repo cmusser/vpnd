@@ -3,7 +3,7 @@
 
 #include "vpnd.h"
 
-bool		open_tun_sock(struct vpn_state *vpn, char *tun_dev_str);
+bool		open_tun_sock(struct vpn_state *vpn, char *tun_name_str);
 void		init_event_processing(struct vpn_state *vpn, bool stdin_events);
 bool		get_forwarding(struct vpn_state *vpn, sa_family_t addr_family);
 void		set_forwarding(struct vpn_state *vpn, sa_family_t addr_family, bool value);

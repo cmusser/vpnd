@@ -5,3 +5,4 @@ vpnd-keygen
 *.keypair
 *.nonce
 cscope.out
+cscope.files
