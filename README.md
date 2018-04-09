@@ -109,7 +109,7 @@ per line, in the following format:
 |Parameter Name|Description|Required?|
 |---|---|---|
 |role|The networking role to assume: `net-gw`, `host-gw`, or `host`. These roles are explained above|no, defaults to `net-gw`|
-|device|The tunnel device path  |no, defaults to `/dev/tun0`.|
+|device|The tunnel device name  |no, defaults to `tun0`.|
 |stats_prefix|prefix to use for Graphite data  |no, defaults to value from`gethostname(3)`.|
 |local_sk|The local secret key|yes, use values from `vpnd-keygen` program.|
 |local_port|local UDP port to listen on|no, defaults to 1337.|
