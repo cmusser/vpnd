@@ -46,8 +46,10 @@ open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 		}
 	}
 
-	if (ok)
+	if (ok) {
 		 strlcpy(vpn->tun_name, ifr.ifr_name, sizeof(vpn->tun_name));
+		 set_tun_state(vpn, UP);
+	}
 
 	return ok;
 }
@@ -140,12 +142,18 @@ set_tun_addrs(struct vpn_state *vpn, char *host_addr_str, tun_addr_mode mode)
 
 	switch (mode) {
 	case HOST_LOCAL:
-		snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s %s %s",
-		    vpn->tun_name, host_addr_str, DUMMY_REMOTE_NET_ADDR);
+		snprintf(cmd, sizeof(cmd), "/usr/sbin/ip addr add %s dev %s",
+		    host_addr_str, vpn->tun_name);
+		spawn_subprocess(vpn, cmd);
 		break;
 	case HOST_REMOTE:
-		snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s %s %s",
-		    vpn->tun_name, DUMMY_REMOTE_NET_ADDR, host_addr_str);
+		snprintf(cmd, sizeof(cmd), "/usr/sbin/ip addr add 127.0.0.1 dev %s",
+		    vpn->tun_name);
+		spawn_subprocess(vpn, cmd);
+
+		snprintf(cmd, sizeof(cmd), "/usr/sbin/ip route add %s dev %s",
+		    host_addr_str, vpn->tun_name);
+		spawn_subprocess(vpn, cmd);
 		break;
 	default:
 		log_msg(vpn, LOG_WARNING, "%s: %s tunnel addr mode (%d)",
@@ -153,7 +161,6 @@ set_tun_addrs(struct vpn_state *vpn, char *host_addr_str, tun_addr_mode mode)
 		return;
 	}
 
-	spawn_subprocess(vpn, cmd);
 	log_msg(vpn, LOG_NOTICE, "%s configured tunnel with host on %s end: %s",
 		    VPN_ROLE_STR(vpn->role), TUN_ADDR_MODE_STR(mode), cmd);
 }
@@ -162,20 +169,15 @@ void
 set_tun_state(struct vpn_state *vpn, intf_action action)
 {
 	char		cmd       [256] = {'\0'};
-#ifdef __NetBSD__
-	const char     *tun_addr = DUMMY_REMOTE_NET_ADDR;
-#else
-	const char     *tun_addr = "";
-#endif
 
 	switch (action) {
 	case UP:
-		snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s %s up",
-		    vpn->tun_name, tun_addr);
+		snprintf(cmd, sizeof(cmd), "/usr/bin/ip link set %s  up",
+		    vpn->tun_name);
 		break;
 	case DOWN:
-		snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s %s down",
-		    vpn->tun_name, tun_addr);
+		snprintf(cmd, sizeof(cmd), "/usr/bin/ip link set %s down",
+		    vpn->tun_name);
 		break;
 	default:
 		log_msg(vpn, LOG_WARNING, "%s action (%d) for tunnel state",
