@@ -245,11 +245,11 @@ extern const char *route_action_string_array[];
 
 struct vpn_peer_info {
 	uint32_t	peer_id;
-	sa_family_t	host_addr_family;
+	uint8_t	host_addr_family;
 	uint8_t		host_prefix_len;
-	sa_family_t	remote_net_addr_family;
+	uint8_t	remote_net_addr_family;
 	uint8_t		remote_net_prefix_len;
-	sa_family_t	resolv_addr_family;
+	uint8_t	resolv_addr_family;
 	unsigned char	host_addr[sizeof(struct in6_addr)];
 	unsigned char	remote_net[sizeof(struct in6_addr)];
 	unsigned char	resolv_addr[sizeof(struct in6_addr)];
