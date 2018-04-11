@@ -308,7 +308,13 @@ struct vpn_state {
 	int		ctrl_sock;
 	int		stats_sock;
 #ifdef __linux__
-	int		epollfd;
+	int		event_fd;
+	int		signal_fd;
+	int		retransmit_peer_init_timer_fd;
+	int		retransmit_key_switch_start_timer_fd;
+	int		retransmit_key_switch_ack_timer_fd;
+	int		retransmit_key_ready_timer_fd;
+	int		active_heartbeat_timer_fd;
 #else
 	struct kevent	kev_changes[8];
 	uint32_t	kev_change_count;

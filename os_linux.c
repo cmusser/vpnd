@@ -1,7 +1,10 @@
+#include <sys/epoll.h>
 #include <sys/ioctl.h>
+#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/sysctl.h>
+#include <sys/timerfd.h>
 
 #include <net/if.h>
 #include <linux/if_tun.h>
@@ -18,8 +21,6 @@
 #include "os.h"
 #include "proto.h"
 #include "util.h"
-
-#define DUMMY_REMOTE_NET_ADDR "192.168.239.254"
 
 bool
 open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
@@ -57,6 +58,104 @@ open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 void
 init_event_processing(struct vpn_state *vpn, bool stdin_events)
 {
+	bool			ok = true;
+	struct epoll_event	ev;
+	sigset_t		sigmask;
+	int 			i;
+	int 			stdin_fd;
+
+	vpn->event_fd = epoll_create1(0);
+	if (vpn->event_fd == -1) {
+		ok = false;
+		log_msg(vpn, LOG_ERR, "Can't create event socket: %s",
+		    strerror(errno));
+	}
+
+	if (ok) {
+		sigemptyset(&sigmask);
+		sigaddset(&sigmask, SIGUSR1);
+		sigaddset(&sigmask, SIGINT);
+		sigaddset(&sigmask, SIGTERM);
+
+		if (sigprocmask(SIG_BLOCK, &sigmask, NULL) == -1) {
+			ok = false;
+			log_msg(vpn, LOG_ERR, "Can't block default signal handling: %s",
+			    strerror(errno));
+		}
+	}
+
+	if (ok) {
+		vpn->signal_fd = signalfd(-1, &sigmask, 0);
+		if (vpn->signal_fd == -1) {
+			ok = false;
+			log_msg(vpn, LOG_ERR, "Can't create signal file descriptor: %s",
+			    strerror(errno));
+		}
+	}
+
+	if (ok) {
+		ev.events = EPOLLIN;
+		ev.data.fd = vpn->signal_fd;
+		if (epoll_ctl(vpn->event_fd, EPOLL_CTL_ADD, vpn->signal_fd, &ev) == -1) {
+			ok = false;
+			log_msg(vpn, LOG_ERR, "Can't add add signals file descriptor "
+			    "to event set: %s", strerror(errno));
+		}
+	}
+
+	if (ok) {
+		int *timers[5] = {&vpn->retransmit_peer_init_timer_fd,
+				  &vpn->retransmit_key_switch_start_timer_fd,
+				  &vpn->retransmit_key_switch_ack_timer_fd,
+				  &vpn->retransmit_key_ready_timer_fd,
+				  &vpn->active_heartbeat_timer_fd };
+
+		for (i = 0; ok && i < 5; i++) {
+			*timers[i] = timerfd_create(CLOCK_MONOTONIC, 0);
+			bzero(&ev, sizeof(ev));
+			ev.events = EPOLLIN;
+			ev.data.fd = *timers[i];
+			if (epoll_ctl(vpn->event_fd, EPOLL_CTL_ADD, *timers[i], &ev) == -1) {
+				ok = false;
+				log_msg(vpn, LOG_ERR, "Can't add timer file descriptor "
+				    "to event set: %s", strerror(errno));
+			}
+		}
+	}
+
+	if (ok) {
+		bzero(&ev, sizeof(ev));
+		ev.events = EPOLLIN;
+		ev.data.fd = vpn->ctrl_sock;
+		if (epoll_ctl(vpn->event_fd, EPOLL_CTL_ADD, vpn->ctrl_sock, &ev) == -1) {
+			ok = false;
+			log_msg(vpn, LOG_ERR, "Can't add control socket file descriptor "
+			    "to event set: %s", strerror(errno));
+		}
+	}
+
+	if (ok) {
+		bzero(&ev, sizeof(ev));
+		ev.events = EPOLLIN;
+		ev.data.fd = vpn->ext_sock;
+		if (epoll_ctl(vpn->event_fd, EPOLL_CTL_ADD, vpn->ext_sock, &ev) == -1) {
+			ok = false;
+			log_msg(vpn, LOG_ERR, "Can't add external socket file descriptor "
+			    "to event set: %s", strerror(errno));
+		}
+	}
+
+	if (ok && stdin_events) {
+		stdin_fd = fileno(stdin);
+		bzero(&ev, sizeof(ev));
+		ev.events = EPOLLIN;
+		ev.data.fd = stdin_fd;
+		if (epoll_ctl(vpn->event_fd, EPOLL_CTL_ADD, stdin_fd, &ev) == -1) {
+			ok = false;
+			log_msg(vpn, LOG_ERR, "Can't add stdin file descriptor "
+			    "to event set: %s", strerror(errno));
+		}
+	}
 }
 
 bool
@@ -132,7 +231,6 @@ set_forwarding(struct vpn_state *vpn, sa_family_t addr_family, bool value)
 			log_msg(vpn, LOG_NOTICE, "sysctl %s=%c", name, flag);
 		fclose(forwarding);
 	}
-
 }
 
 void
@@ -196,11 +294,11 @@ configure_route_on_host(struct vpn_state *vpn, char *net_addr_str, route_action 
 
 	switch (action) {
 	case ADD:
-		snprintf(cmd, sizeof(cmd), "/sbin/route add %s/%u -interface %s",
+		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route add %s/%u dev %s",
 		    net_addr_str, vpn->rx_peer_info.host_prefix_len, vpn->tun_name);
 		break;
 	case DELETE:
-		snprintf(cmd, sizeof(cmd), "/sbin/route delete %s/%u -interface %s",
+		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route delete %s/%u dev %s",
 		    net_addr_str, vpn->rx_peer_info.host_prefix_len, vpn->tun_name);
 		break;
 	default:
@@ -218,22 +316,14 @@ configure_route_on_net_gw(struct vpn_state *vpn, char *remote_network_str, route
 {
 	char		cmd       [256] = {'\0'};
 
-#ifdef __NetBSD__
-	const char     *route_param = "-link ";
-#else
-	const char     *route_param = "";
-#endif
-
 	switch (action) {
 	case ADD:
-		snprintf(cmd, sizeof(cmd), "/sbin/route add %s/%u %s-interface %s",
-		    remote_network_str, vpn->remote_network_prefix_len,
-		    route_param, vpn->tun_name);
+		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route add %s/%u dev %s",
+		    remote_network_str, vpn->remote_network_prefix_len, vpn->tun_name);
 		break;
 	case DELETE:
-		snprintf(cmd, sizeof(cmd), "/sbin/route delete %s/%u %s-interface %s",
-		    remote_network_str, vpn->remote_network_prefix_len,
-		    route_param, vpn->tun_name);
+		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route delete %s/%u dev %s",
+		    remote_network_str, vpn->remote_network_prefix_len, vpn->tun_name);
 		break;
 	default:
 		log_msg(vpn, LOG_WARNING, "%s route action (%d)",
@@ -254,12 +344,102 @@ get_cur_monotonic(struct timespec *tp)
 void
 add_timer(struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval)
 {
+		struct itimerspec new_timeout;
+
+	bzero(&new_timeout, sizeof(new_timeout));
+	new_timeout.it_value.tv_sec = timeout_interval;
+
+	switch (ttype) {
+	case RETRANSMIT_PEER_INIT:
+		timerfd_settime(vpn->retransmit_peer_init_timer_fd, 0, &new_timeout, NULL);
+		break;
+	case RETRANSMIT_KEY_SWITCH_START:
+		timerfd_settime(vpn->retransmit_key_switch_start_timer_fd, 0, &new_timeout, NULL);
+		break;
+	case RETRANSMIT_KEY_SWITCH_ACK:
+		timerfd_settime(vpn->retransmit_key_switch_ack_timer_fd, 0, &new_timeout, NULL);
+		break;
+	case RETRANSMIT_KEY_READY:
+		timerfd_settime(vpn->retransmit_key_ready_timer_fd, 0, &new_timeout, NULL);
+		break;
+	case ACTIVE_HEARTBEAT:
+		timerfd_settime(vpn->active_heartbeat_timer_fd, 0, &new_timeout, NULL);
+		break;
+	default:
+		log_msg(vpn, LOG_ERR, "unknown timer time %d\n", ttype);
+	}
 }
 
 bool
 run(struct vpn_state *vpn)
 {
-	bool		ok = true;
+	bool			ok = true;
+	struct epoll_event	events[1];
+	int			nev, i, fd;
+	uint64_t		expire;
+	ssize_t			siginfo_len;
+	struct signalfd_siginfo	siginfo;
+
+	while (ok) {
+		bzero(&events, sizeof(events));
+		nev = epoll_wait(vpn->event_fd, events, 1, -1);
+		if (nev == -1) {
+			ok = false;
+			log_msg(vpn, LOG_ERR, "epoll_wait: %s", strerror(errno));
+		}
+
+		for (i = 0; i < nev; i++) {
+			fd = events[i].data.fd;
+			if (fd == vpn->ext_sock)
+				ext_sock_input(vpn);
+			else if (fd == vpn->ctrl_sock)
+				ctrl_sock_input(vpn);
+			else if (fd == vpn->stats_sock)
+				stats_sock_input(vpn);
+			else if (fd == STDIN_FILENO) {
+				stdin_input(vpn);
+			} else if (fd == vpn->retransmit_peer_init_timer_fd) {
+				read(fd, &expire, sizeof(expire));
+				process_timeout(vpn, RETRANSMIT_PEER_INIT);
+			} else if (fd == vpn->retransmit_key_switch_start_timer_fd) {
+				read(fd, &expire, sizeof(expire));
+				process_timeout(vpn, RETRANSMIT_KEY_SWITCH_START);
+			} else if (fd == vpn->retransmit_key_switch_ack_timer_fd) {
+				read(fd, &expire, sizeof(expire));
+				process_timeout(vpn, RETRANSMIT_KEY_SWITCH_ACK);
+			} else if (fd == vpn->retransmit_key_ready_timer_fd) {
+				read(fd, &expire, sizeof(expire));
+				process_timeout(vpn, RETRANSMIT_KEY_READY);
+			} else if (fd ==  vpn->active_heartbeat_timer_fd) {
+				read(fd, &expire, sizeof(expire));
+				process_timeout(vpn, ACTIVE_HEARTBEAT);
+			} else if (fd ==  vpn->signal_fd) {
+				siginfo_len = read(vpn->signal_fd, &siginfo, sizeof(siginfo));
+				if (siginfo_len == sizeof(siginfo)) {
+					switch (siginfo.ssi_signo) {
+					case  SIGUSR1:
+						log_stats(vpn);
+						break;
+					case SIGINT:
+					case SIGTERM:
+						ok = false;
+						log_msg(vpn, LOG_NOTICE, "shutting down (signal %u)",
+							siginfo.ssi_signo);
+						write_nonce(vpn, REMOTE);
+						return_to_init_state(vpn);
+						break;
+					default:
+						break;
+					}
+				} else {
+					log_msg(vpn, LOG_WARNING, "can't read info for caught signal: %s",
+					    strerror(errno));
+				}
+			} else {
+				log_msg(vpn, LOG_WARNING, "event on unhandled file descriptor %d\n", fd);
+			}
+		}
+	}
 
 	return ok;
 }
