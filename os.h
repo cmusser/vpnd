@@ -4,7 +4,7 @@
 #include "vpnd.h"
 
 bool		open_tun_sock(struct vpn_state *vpn, char *tun_name_str);
-void		init_event_processing(struct vpn_state *vpn, bool stdin_events);
+bool		init_event_processing(struct vpn_state *vpn, bool stdin_events);
 bool		get_forwarding(struct vpn_state *vpn, sa_family_t addr_family);
 void		set_forwarding(struct vpn_state *vpn, sa_family_t addr_family, bool value);
 void		set_tun_addrs(struct vpn_state *vpn, char *host_addr_str, tun_addr_mode mode);

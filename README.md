@@ -22,7 +22,7 @@ stage.
   decrypting recorded flows in the future, even if the initial private
   keys are compromised. This is known as "forward secrecy".
 
-- BSD-only at the moment, but a port to Linux is possible. The status of
+- BSD-only at the moment, but a port to Linux is in progress. The status of
   porting is described below.
 
 - Layer 3 transport. Saves bandwidth and prevents broadcast traffic
@@ -226,7 +226,7 @@ or
 |DragonFlyBSD|Works in all modes.|
 |FreeBSD|Works in all modes.|
 |NetBSD|Works in `host-gw` and `net-gw` modes. `host` mode untested|
-|Linux|Porting not started. The event handling code (based on `kqueue`) would need to be replaced with `epoll` and the `timerfd_*` and `signalfd` family of functions. The commands used to configure networking would also need modification.|
+|Linux|The code compiles and runs. Currently, it can establish a session in host mode and send a decryptable packet, but cannot maintain a session.|
 |Mac OS X|Doesn't compile currently. Needs the 3rd-party `tun(4)` KEXT. A compatibility function is needed for `clock_gettime(2)`.|
 
 ## Protocol Details

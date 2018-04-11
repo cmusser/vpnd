@@ -65,7 +65,7 @@ open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 	return ok;
 }
 
-void
+bool
 init_event_processing(struct vpn_state *vpn, bool stdin_events)
 {
 	EV_SET(&vpn->kev_changes[0], vpn->ext_sock,
@@ -95,6 +95,8 @@ init_event_processing(struct vpn_state *vpn, bool stdin_events)
 		    EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
 		vpn->kev_change_count++;
 	}
+
+	return true;
 }
 
 bool

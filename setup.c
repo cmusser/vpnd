@@ -192,17 +192,17 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		 * Ensure that all required parameters are present and, if
 		 * possible, set defaults for parameters that have them.
 		 * There is special treatment for:
-		 * 
+		 *
 		 * role: ensure the role is one of the legal values.
-		 * 
+		 *
 		 * remote_host: require in host and net gateway role
-		 * 
+		 *
 		 * host_addr: require in host gateway role.
-		 * 
+		 *
 		 * local_network: require in host gateway role.
-		 * 
+		 *
 		 * remote_network: require in net gateway role.
-		 * 
+		 *
 		 * stats_prefix: let the default be the hostname, which must be
 		 * computed and hence cannot be hardcoded into the array of
 		 * config parameters
@@ -435,7 +435,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		if (ok) {
 			ok = open_tun_sock(vpn, tunnel_device);
 		}
-		
+
 		/* open stats socket */
 		if (ok) {
 			if ((vpn->stats_sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
@@ -486,6 +486,9 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 					strerror(errno));
 			}
 		}
+
+		ok = init_event_processing(vpn, fflag);
+
 		if (ok) {
 			generate_peer_id(vpn);
 			if (read_nonce(vpn, LOCAL)) {
@@ -504,8 +507,6 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				log_nonce(vpn, "initializing remote nonce",
 					  vpn->remote_nonce);
 			}
-
-			init_event_processing(vpn, fflag);
 
 			vpn->rx_data_bytes = vpn->rx_packets = vpn->rx_late_packets =
 				vpn->tx_data_bytes = vpn->tx_packets =

@@ -34,43 +34,39 @@ open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 		ok = false;
 		log_msg(vpn, LOG_ERR, "couldn't open tunnel: %s", strerror(errno));
 	}
-
 	if (ok) {
 		bzero(&ifr, sizeof(ifr));
 		ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
 		strlcpy(ifr.ifr_name, tun_name_str, IFNAMSIZ);
-		if(ioctl(vpn->ctrl_sock, TUNSETIFF, (void *) &ifr) < 0 ) {
+		if (ioctl(vpn->ctrl_sock, TUNSETIFF, (void *)&ifr) < 0) {
 			ok = false;
 			close(vpn->ctrl_sock);
 			log_msg(vpn, LOG_ERR, "couldn't configure tunnel: %s",
-			    strerror(errno));
+				strerror(errno));
 		}
 	}
-
 	if (ok) {
-		 strlcpy(vpn->tun_name, ifr.ifr_name, sizeof(vpn->tun_name));
-		 set_tun_state(vpn, UP);
+		strlcpy(vpn->tun_name, ifr.ifr_name, sizeof(vpn->tun_name));
+		set_tun_state(vpn, UP);
 	}
-
 	return ok;
 }
 
-void
+bool
 init_event_processing(struct vpn_state *vpn, bool stdin_events)
 {
-	bool			ok = true;
-	struct epoll_event	ev;
-	sigset_t		sigmask;
-	int 			i;
-	int 			stdin_fd;
+	bool		ok = true;
+	struct epoll_event ev;
+	sigset_t	sigmask;
+	int		i;
+	int		stdin_fd;
 
 	vpn->event_fd = epoll_create1(0);
 	if (vpn->event_fd == -1) {
 		ok = false;
 		log_msg(vpn, LOG_ERR, "Can't create event socket: %s",
-		    strerror(errno));
+			strerror(errno));
 	}
-
 	if (ok) {
 		sigemptyset(&sigmask);
 		sigaddset(&sigmask, SIGUSR1);
@@ -80,35 +76,32 @@ init_event_processing(struct vpn_state *vpn, bool stdin_events)
 		if (sigprocmask(SIG_BLOCK, &sigmask, NULL) == -1) {
 			ok = false;
 			log_msg(vpn, LOG_ERR, "Can't block default signal handling: %s",
-			    strerror(errno));
+				strerror(errno));
 		}
 	}
-
 	if (ok) {
 		vpn->signal_fd = signalfd(-1, &sigmask, 0);
 		if (vpn->signal_fd == -1) {
 			ok = false;
 			log_msg(vpn, LOG_ERR, "Can't create signal file descriptor: %s",
-			    strerror(errno));
+				strerror(errno));
 		}
 	}
-
 	if (ok) {
 		ev.events = EPOLLIN;
 		ev.data.fd = vpn->signal_fd;
 		if (epoll_ctl(vpn->event_fd, EPOLL_CTL_ADD, vpn->signal_fd, &ev) == -1) {
 			ok = false;
 			log_msg(vpn, LOG_ERR, "Can't add add signals file descriptor "
-			    "to event set: %s", strerror(errno));
+				"to event set: %s", strerror(errno));
 		}
 	}
-
 	if (ok) {
-		int *timers[5] = {&vpn->retransmit_peer_init_timer_fd,
-				  &vpn->retransmit_key_switch_start_timer_fd,
-				  &vpn->retransmit_key_switch_ack_timer_fd,
-				  &vpn->retransmit_key_ready_timer_fd,
-				  &vpn->active_heartbeat_timer_fd };
+		int            *timers[5] = {&vpn->retransmit_peer_init_timer_fd,
+			&vpn->retransmit_key_switch_start_timer_fd,
+			&vpn->retransmit_key_switch_ack_timer_fd,
+			&vpn->retransmit_key_ready_timer_fd,
+		&vpn->active_heartbeat_timer_fd};
 
 		for (i = 0; ok && i < 5; i++) {
 			*timers[i] = timerfd_create(CLOCK_MONOTONIC, 0);
@@ -118,11 +111,10 @@ init_event_processing(struct vpn_state *vpn, bool stdin_events)
 			if (epoll_ctl(vpn->event_fd, EPOLL_CTL_ADD, *timers[i], &ev) == -1) {
 				ok = false;
 				log_msg(vpn, LOG_ERR, "Can't add timer file descriptor "
-				    "to event set: %s", strerror(errno));
+					"to event set: %s", strerror(errno));
 			}
 		}
 	}
-
 	if (ok) {
 		bzero(&ev, sizeof(ev));
 		ev.events = EPOLLIN;
@@ -130,10 +122,9 @@ init_event_processing(struct vpn_state *vpn, bool stdin_events)
 		if (epoll_ctl(vpn->event_fd, EPOLL_CTL_ADD, vpn->ctrl_sock, &ev) == -1) {
 			ok = false;
 			log_msg(vpn, LOG_ERR, "Can't add control socket file descriptor "
-			    "to event set: %s", strerror(errno));
+				"to event set: %s", strerror(errno));
 		}
 	}
-
 	if (ok) {
 		bzero(&ev, sizeof(ev));
 		ev.events = EPOLLIN;
@@ -141,10 +132,9 @@ init_event_processing(struct vpn_state *vpn, bool stdin_events)
 		if (epoll_ctl(vpn->event_fd, EPOLL_CTL_ADD, vpn->ext_sock, &ev) == -1) {
 			ok = false;
 			log_msg(vpn, LOG_ERR, "Can't add external socket file descriptor "
-			    "to event set: %s", strerror(errno));
+				"to event set: %s", strerror(errno));
 		}
 	}
-
 	if (ok && stdin_events) {
 		stdin_fd = fileno(stdin);
 		bzero(&ev, sizeof(ev));
@@ -153,17 +143,18 @@ init_event_processing(struct vpn_state *vpn, bool stdin_events)
 		if (epoll_ctl(vpn->event_fd, EPOLL_CTL_ADD, stdin_fd, &ev) == -1) {
 			ok = false;
 			log_msg(vpn, LOG_ERR, "Can't add stdin file descriptor "
-			    "to event set: %s", strerror(errno));
+				"to event set: %s", strerror(errno));
 		}
 	}
+	return ok;
 }
 
 bool
 get_forwarding(struct vpn_state *vpn, sa_family_t addr_family)
 {
 	bool		flag_bool = false;
-	char		*name;
-	FILE		*forwarding;
+	char           *name;
+	FILE           *forwarding;
 	char		forwarding_str;
 
 	switch (addr_family) {
@@ -176,7 +167,7 @@ get_forwarding(struct vpn_state *vpn, sa_family_t addr_family)
 	default:
 		name = "/proc/sys/net/ipv4/conf/all/forwarding";
 		log_msg(vpn, LOG_WARNING, "unknown forwarding address family %d, "
-		    "defaulting to IPv4", addr_family);
+			"defaulting to IPv4", addr_family);
 	}
 
 	forwarding = fopen(name, "r");
@@ -189,7 +180,7 @@ get_forwarding(struct vpn_state *vpn, sa_family_t addr_family)
 				name, strerror(errno));
 		else
 			flag_bool = (strncmp(&forwarding_str, "0",
-				sizeof(forwarding_str)) == 0) ? false : true;
+			       sizeof(forwarding_str)) == 0) ? false : true;
 	}
 	fclose(forwarding);
 
@@ -200,8 +191,8 @@ void
 set_forwarding(struct vpn_state *vpn, sa_family_t addr_family, bool value)
 {
 	char		flag;
-	char		*name;
-	FILE		*forwarding;
+	char           *name;
+	FILE           *forwarding;
 
 	switch (addr_family) {
 	case AF_INET:
@@ -212,7 +203,7 @@ set_forwarding(struct vpn_state *vpn, sa_family_t addr_family, bool value)
 		break;
 	default:
 		log_msg(vpn, LOG_ERR, "unknown forwarding address family %d, "
-		    "ignoring request", addr_family);
+			"ignoring request", addr_family);
 		return;
 	}
 
@@ -241,16 +232,16 @@ set_tun_addrs(struct vpn_state *vpn, char *host_addr_str, tun_addr_mode mode)
 	switch (mode) {
 	case HOST_LOCAL:
 		snprintf(cmd, sizeof(cmd), "/usr/sbin/ip addr add %s dev %s",
-		    host_addr_str, vpn->tun_name);
+			 host_addr_str, vpn->tun_name);
 		spawn_subprocess(vpn, cmd);
 		break;
 	case HOST_REMOTE:
 		snprintf(cmd, sizeof(cmd), "/usr/sbin/ip addr add 127.0.0.1 dev %s",
-		    vpn->tun_name);
+			 vpn->tun_name);
 		spawn_subprocess(vpn, cmd);
 
 		snprintf(cmd, sizeof(cmd), "/usr/sbin/ip route add %s dev %s",
-		    host_addr_str, vpn->tun_name);
+			 host_addr_str, vpn->tun_name);
 		spawn_subprocess(vpn, cmd);
 		break;
 	default:
@@ -260,7 +251,7 @@ set_tun_addrs(struct vpn_state *vpn, char *host_addr_str, tun_addr_mode mode)
 	}
 
 	log_msg(vpn, LOG_NOTICE, "%s configured tunnel with host on %s end: %s",
-		    VPN_ROLE_STR(vpn->role), TUN_ADDR_MODE_STR(mode), cmd);
+		VPN_ROLE_STR(vpn->role), TUN_ADDR_MODE_STR(mode), cmd);
 }
 
 void
@@ -271,20 +262,20 @@ set_tun_state(struct vpn_state *vpn, intf_action action)
 	switch (action) {
 	case UP:
 		snprintf(cmd, sizeof(cmd), "/usr/bin/ip link set %s  up",
-		    vpn->tun_name);
+			 vpn->tun_name);
 		break;
 	case DOWN:
 		snprintf(cmd, sizeof(cmd), "/usr/bin/ip link set %s down",
-		    vpn->tun_name);
+			 vpn->tun_name);
 		break;
 	default:
 		log_msg(vpn, LOG_WARNING, "%s action (%d) for tunnel state",
-		    INTF_ACTION_STR(action), action);
+			INTF_ACTION_STR(action), action);
 		return;
 	}
 	spawn_subprocess(vpn, cmd);
 	log_msg(vpn, LOG_NOTICE, "%s configured tunnel state to %s: %s",
-	    VPN_ROLE_STR(vpn->role), INTF_ACTION_STR(action), cmd);
+		VPN_ROLE_STR(vpn->role), INTF_ACTION_STR(action), cmd);
 }
 
 void
@@ -295,20 +286,20 @@ configure_route_on_host(struct vpn_state *vpn, char *net_addr_str, route_action 
 	switch (action) {
 	case ADD:
 		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route add %s/%u dev %s",
-		    net_addr_str, vpn->rx_peer_info.host_prefix_len, vpn->tun_name);
+			 net_addr_str, vpn->rx_peer_info.host_prefix_len, vpn->tun_name);
 		break;
 	case DELETE:
 		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route delete %s/%u dev %s",
-		    net_addr_str, vpn->rx_peer_info.host_prefix_len, vpn->tun_name);
+			 net_addr_str, vpn->rx_peer_info.host_prefix_len, vpn->tun_name);
 		break;
 	default:
 		log_msg(vpn, LOG_WARNING, "%s route action (%d)",
-		    ROUTE_ACTION_STR(action), action);
+			ROUTE_ACTION_STR(action), action);
 		return;
 	}
 	spawn_subprocess(vpn, cmd);
 	log_msg(vpn, LOG_NOTICE, "%s route %s: %s",
-	    VPN_ROLE_STR(vpn->role), ROUTE_ACTION_STR(action), cmd);
+		VPN_ROLE_STR(vpn->role), ROUTE_ACTION_STR(action), cmd);
 }
 
 void
@@ -319,20 +310,20 @@ configure_route_on_net_gw(struct vpn_state *vpn, char *remote_network_str, route
 	switch (action) {
 	case ADD:
 		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route add %s/%u dev %s",
-		    remote_network_str, vpn->remote_network_prefix_len, vpn->tun_name);
+			 remote_network_str, vpn->remote_network_prefix_len, vpn->tun_name);
 		break;
 	case DELETE:
 		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route delete %s/%u dev %s",
-		    remote_network_str, vpn->remote_network_prefix_len, vpn->tun_name);
+			 remote_network_str, vpn->remote_network_prefix_len, vpn->tun_name);
 		break;
 	default:
 		log_msg(vpn, LOG_WARNING, "%s route action (%d)",
-		    ROUTE_ACTION_STR(action), action);
+			ROUTE_ACTION_STR(action), action);
 		return;
 	}
 	spawn_subprocess(vpn, cmd);
 	log_msg(vpn, LOG_NOTICE, "%s route %s: %s",
-	    VPN_ROLE_STR(vpn->role), ROUTE_ACTION_STR(action), cmd);
+		VPN_ROLE_STR(vpn->role), ROUTE_ACTION_STR(action), cmd);
 }
 
 void
@@ -344,7 +335,7 @@ get_cur_monotonic(struct timespec *tp)
 void
 add_timer(struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval)
 {
-		struct itimerspec new_timeout;
+	struct itimerspec new_timeout;
 
 	bzero(&new_timeout, sizeof(new_timeout));
 	new_timeout.it_value.tv_sec = timeout_interval;
@@ -373,12 +364,12 @@ add_timer(struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval)
 bool
 run(struct vpn_state *vpn)
 {
-	bool			ok = true;
-	struct epoll_event	events[1];
-	int			nev, i, fd;
-	uint64_t		expire;
-	ssize_t			siginfo_len;
-	struct signalfd_siginfo	siginfo;
+	bool		ok = true;
+	struct epoll_event events[1];
+	int		nev       , i, fd;
+	uint64_t	expire;
+	ssize_t		siginfo_len;
+	struct signalfd_siginfo siginfo;
 
 	while (ok) {
 		bzero(&events, sizeof(events));
@@ -387,7 +378,6 @@ run(struct vpn_state *vpn)
 			ok = false;
 			log_msg(vpn, LOG_ERR, "epoll_wait: %s", strerror(errno));
 		}
-
 		for (i = 0; i < nev; i++) {
 			fd = events[i].data.fd;
 			if (fd == vpn->ext_sock)
@@ -410,14 +400,14 @@ run(struct vpn_state *vpn)
 			} else if (fd == vpn->retransmit_key_ready_timer_fd) {
 				read(fd, &expire, sizeof(expire));
 				process_timeout(vpn, RETRANSMIT_KEY_READY);
-			} else if (fd ==  vpn->active_heartbeat_timer_fd) {
+			} else if (fd == vpn->active_heartbeat_timer_fd) {
 				read(fd, &expire, sizeof(expire));
 				process_timeout(vpn, ACTIVE_HEARTBEAT);
-			} else if (fd ==  vpn->signal_fd) {
+			} else if (fd == vpn->signal_fd) {
 				siginfo_len = read(vpn->signal_fd, &siginfo, sizeof(siginfo));
 				if (siginfo_len == sizeof(siginfo)) {
 					switch (siginfo.ssi_signo) {
-					case  SIGUSR1:
+					case SIGUSR1:
 						log_stats(vpn);
 						break;
 					case SIGINT:
@@ -433,7 +423,7 @@ run(struct vpn_state *vpn)
 					}
 				} else {
 					log_msg(vpn, LOG_WARNING, "can't read info for caught signal: %s",
-					    strerror(errno));
+						strerror(errno));
 				}
 			} else {
 				log_msg(vpn, LOG_WARNING, "event on unhandled file descriptor %d\n", fd);
