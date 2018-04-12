@@ -1,5 +1,5 @@
 # vpnd
-NaCl-based VPN for BSD systems
+NaCl-based VPN for UNIX systems
 
 ## Overview
 
@@ -22,9 +22,6 @@ stage.
   decrypting recorded flows in the future, even if the initial private
   keys are compromised. This is known as "forward secrecy".
 
-- BSD-only at the moment, but a port to Linux is in progress. The status of
-  porting is described below.
-
 - Layer 3 transport. Saves bandwidth and prevents broadcast traffic
   from traversing the link.
 
@@ -41,7 +38,8 @@ stage.
 
 ## Requirements
 
-1. A BSD system. The primary focus is on {DragonFly,Free,Net}BSD
+1. A BSD or Linux system. Development is on {DragonFly,Free,Net}BSD, and
+   Arch Linux.
 2. libsodium >= 1.0.7
 3. The `resolvconf` utility (only needed for HOST role)
 
@@ -226,8 +224,8 @@ or
 |DragonFlyBSD|Works in all modes.|
 |FreeBSD|Works in all modes.|
 |NetBSD|Works in `host-gw` and `net-gw` modes. `host` mode untested|
-|Linux|The code compiles and runs. Currently, it can establish a session in host mode and send a decryptable packet, but cannot maintain a session.|
-|Mac OS X|Doesn't compile currently. Needs the 3rd-party `tun(4)` KEXT. A compatibility function is needed for `clock_gettime(2)`.|
+|Linux|Works in `host` mode. The other modes are untested, but are likely to work|
+|Mac OS X|Doesn't compile currently. Needs the 3rd-party `tun(4)` KEXT.  A compatibility function is needed for `clock_gettime(2)`.|
 
 ## Protocol Details
 
