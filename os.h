@@ -12,6 +12,6 @@ void		set_tun_state(struct vpn_state *vpn, intf_action action);
 void		configure_route_on_net_gw(struct vpn_state *vpn, char *remote_network_str, route_action action);
 void		configure_route_on_host(struct vpn_state *vpn, char *net_addr_str, route_action action);
 void		get_cur_monotonic(struct timespec *tp);
-void		add_timer (struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval);
+void		add_timer (struct vpn_state *vpn, timer_type ttype);
 bool		run       (struct vpn_state *vpn);
 #endif				/* !_VPND_OS_H_ */

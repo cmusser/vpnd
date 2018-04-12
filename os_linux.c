@@ -333,12 +333,12 @@ get_cur_monotonic(struct timespec *tp)
 }
 
 void
-add_timer(struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval)
+add_timer(struct vpn_state *vpn, timer_type ttype)
 {
 	struct itimerspec new_timeout;
 
 	bzero(&new_timeout, sizeof(new_timeout));
-	new_timeout.it_value.tv_sec = timeout_interval;
+	new_timeout.it_value = get_timeout_interval(ttype);
 
 	switch (ttype) {
 	case RETRANSMIT_PEER_INIT:

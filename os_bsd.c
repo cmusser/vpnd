@@ -275,12 +275,19 @@ get_cur_monotonic(struct timespec *tp)
 }
 
 void
-add_timer(struct vpn_state *vpn, timer_type ttype, intptr_t timeout_interval)
+add_timer(struct vpn_state *vpn, timer_type ttype)
 {
+	struct timespec interval;
+	uintptr_t interval_msecs;
+
+	interval = get_timeout_interval(vpn, ttype);
+	interval_msecs = (interval.tv_sec * 1000) +
+	    (interval.tv_nsec  /1000000);
+
 	if (vpn->kev_change_count < COUNT_OF(vpn->kev_changes)) {
 		EV_SET(&vpn->kev_changes[vpn->kev_change_count], ttype,
 		       EVFILT_TIMER, EV_ADD | EV_ENABLE | EV_ONESHOT, 0,
-		       timeout_interval, 0);
+		       interval_msecs, 0);
 		vpn->kev_change_count++;
 
 	} else {

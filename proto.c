@@ -22,10 +22,12 @@
 
 #define PEER_MAX_HEARTBEAT_INTERVAL_SECS 20
 #define MAX_HOST_GW_INIT_SECS 120
-#define PEER_INIT_RETRANS_INTERVAL (5 * 1000)
-#define HEARTBEAT_INTERVAL (10 * 1000)
-#define KEY_SWITCH_RETRANS_INTERVAL (500)
-#define KEY_READY_RETRANS_INTERVAL (500)
+#define PEER_INIT_RETRANS_INTERVAL_SECS 5
+#define PEER_INIT_RETRANS_INTERVAL_NSECS 0
+#define KEY_MGMT_RETRANS_INTERVAL_SECS 0
+#define KEY_MGMT_RETRANS_INTERVAL_NSECS 500000000
+#define HEARTBEAT_INTERVAL_SECS 10
+#define HEARTBEAT_INTERVAL_NSECS 0
 
 typedef enum {
 	MASTER,
@@ -46,6 +48,36 @@ generate_peer_id(struct vpn_state *vpn)
 {
 	randombytes_buf(&vpn->peer_id, sizeof(vpn->peer_id));
 	vpn->tx_peer_info.peer_id = htonl(vpn->peer_id);
+}
+
+struct timespec
+get_timeout_interval(struct vpn_state *vpn, timer_type ttype)
+{
+	struct timespec interval;
+
+	switch (ttype) {
+	case RETRANSMIT_PEER_INIT:
+		interval.tv_sec = PEER_INIT_RETRANS_INTERVAL_SECS;
+		interval.tv_nsec = PEER_INIT_RETRANS_INTERVAL_NSECS;
+		break;
+	case RETRANSMIT_KEY_SWITCH_START:
+	case RETRANSMIT_KEY_SWITCH_ACK:
+	case RETRANSMIT_KEY_READY:
+		interval.tv_sec = KEY_MGMT_RETRANS_INTERVAL_SECS;
+		interval.tv_nsec = KEY_MGMT_RETRANS_INTERVAL_NSECS;
+		break;
+	case ACTIVE_HEARTBEAT:
+		interval.tv_sec = HEARTBEAT_INTERVAL_SECS;
+		interval.tv_nsec = HEARTBEAT_INTERVAL_NSECS;
+		break;
+	default:
+		interval.tv_sec = 0;
+		interval.tv_nsec = 0;
+		log_msg(vpn, LOG_WARNING, "no interval for %s timer type",
+		    TIMER_TYPE_STR(ttype));
+	}
+
+	return interval;
 }
 
 vpn_key_role
@@ -191,7 +223,6 @@ tx_peer_info(struct vpn_state *vpn)
 	bool		ok;
 	struct vpn_msg	msg;
 	timer_type	ttype;
-	intptr_t	timeout_interval;
 
 	ok = true;
 	msg.type = PEER_INFO;
@@ -199,12 +230,10 @@ tx_peer_info(struct vpn_state *vpn)
 	switch (vpn->state) {
 	case INIT:
 		ttype = RETRANSMIT_PEER_INIT;
-		timeout_interval = PEER_INIT_RETRANS_INTERVAL;
 		break;
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
 		ttype = ACTIVE_HEARTBEAT;
-		timeout_interval = HEARTBEAT_INTERVAL;
 		break;
 	default:
 		ok = false;
@@ -217,7 +246,7 @@ tx_peer_info(struct vpn_state *vpn)
 		memcpy(&msg.data, &vpn->tx_peer_info,
 		       sizeof(vpn->tx_peer_info));
 		if (tx_encrypted(vpn, &msg, sizeof(vpn->tx_peer_info)))
-			add_timer(vpn, ttype, timeout_interval);
+			add_timer(vpn, ttype);
 	}
 }
 
@@ -251,7 +280,7 @@ tx_new_public_key(struct vpn_state *vpn)
 		msg.type = type;
 		memcpy(msg.data, vpn->new_public_key, sizeof(vpn->new_public_key));
 		if (tx_encrypted(vpn, &msg, sizeof(vpn->new_public_key)))
-			add_timer(vpn, ttype, KEY_SWITCH_RETRANS_INTERVAL);
+			add_timer(vpn, ttype);
 	}
 }
 
@@ -279,7 +308,7 @@ tx_key_ready(struct vpn_state *vpn)
 		memcpy(&msg.data, &vpn->tx_peer_info,
 		       sizeof(vpn->tx_peer_info));
 		if (tx_encrypted(vpn, &msg, sizeof(vpn->tx_peer_info)))
-			add_timer(vpn, RETRANSMIT_KEY_READY, KEY_READY_RETRANS_INTERVAL);
+			add_timer(vpn, RETRANSMIT_KEY_READY);
 	}
 }
 
