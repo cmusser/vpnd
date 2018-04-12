@@ -338,7 +338,7 @@ add_timer(struct vpn_state *vpn, timer_type ttype)
 	struct itimerspec new_timeout;
 
 	bzero(&new_timeout, sizeof(new_timeout));
-	new_timeout.it_value = get_timeout_interval(ttype);
+	new_timeout.it_value = get_timeout_interval(vpn, ttype);
 
 	switch (ttype) {
 	case RETRANSMIT_PEER_INIT:
