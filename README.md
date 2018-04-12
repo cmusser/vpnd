@@ -110,7 +110,7 @@ per line, in the following format:
 |device|The tunnel device name  |no, defaults to `tun0`.|
 |stats_prefix|prefix to use for Graphite data  |no, defaults to value from`gethostname(3)`.|
 |local_sk|The local secret key|yes, use values from `vpnd-keygen` program.|
-|local_port|local UDP port to listen on|no, defaults to 1337.|
+|local_port|local UDP port to listen on|no, defaults to 4706.|
 |remote_pk|The peer's public key|yes, use values from `vpnd-keygen` program|
 |remote_host|hostname or IP address of remote peer.|yes, in `host` and `net-gw` role.|
 |remote_network|The address of the remote network.|yes, in `net-gw` role. Specified in CIDR notation, ie 192.168.1.0/24|
@@ -119,7 +119,7 @@ per line, in the following format:
 |resolv_addr|In `host-gw` mode, the address of the DNS resolver to be used by the client|no|
 |resolv_domain|In `host-gw` mode, the DNS search domain to be used by the client|no|
 |resolvconf_path|In `host` mode, the path to the `resolvconf` utility|no, defaults to `/sbin/resolvconf`|
-|remote_port|UDP port on peer to listen on|no, defaults to 1337.|
+|remote_port|UDP port on peer to listen on|no, defaults to 4706.|
 |max_key_age|Maximum age for ephemeral key, in seconds.|no, defaults to 60 seconds. Range is 30-3,600|
 |max_key_packets|Maximum number of packets that can be sent with ephemeral key|no, defaults to 100,000. Range is 5000-10,000,000|
 |local_nonce_file|Name of local nonce reset point file|no, defaults to `/var/db/local_vpnd.nonce`|
