@@ -498,6 +498,8 @@ ext_sock_input(struct vpn_state *vpn)
 	struct iovec	rx_iovec[2];
 	size_t		data_len;
 
+	dgrams_remaining = vpn->max_reads_per_event;
+
 	if (vpn->role == HOST_GW && vpn->state == HOST_WAIT) {
 		/* Unconnected socket, peer address will be available. */
 		msghdr.msg_name = &peer_addr;
@@ -567,23 +569,20 @@ ext_sock_input(struct vpn_state *vpn)
 				vpn->ext_sock_rx_per_event_max_reached++;
 			}
 		} else {
-			/*
-			 * Ignore ECONNREFUSED because it's expected when sending on
-			 * a connected socket and the peer is not available. The
-			 * other host responds with an ICMP "port unreachable" that
-			 * doesn't warrant an error message.
-			 */
-			if (errno != ECONNREFUSED)
-				log_msg(vpn, LOG_ERR, "%s: recvmsg failed from tunnel socket -- %s (%d)",
-				    VPN_STATE_STR(vpn->state), strerror(errno), errno);
-			else if (errno == EAGAIN) {
+			if (errno == EAGAIN) {
 				uint32_t ct = vpn->max_reads_per_event - dgrams_remaining;
 				if (ct > vpn->ext_sock_rx_per_event_hi_water)
 					vpn->ext_sock_rx_per_event_hi_water = ct;
 				dgrams_remaining = 0;
-			} else {
-				ok = false;
-				fprintf(stderr, "recvmsg: %s\n", strerror(errno));
+			} else if (errno != ECONNREFUSED) {
+				/*
+				 * Ignore ECONNREFUSED because it's expected when sending on
+				 * a connected socket and the peer is not available. The
+				 * other host responds with an ICMP "port unreachable" that
+				 * doesn't warrant an error message.
+				 */
+				log_msg(vpn, LOG_ERR, "%s: recvmsg failed from tunnel socket -- %s (%d)",
+				    VPN_STATE_STR(vpn->state), strerror(errno), errno);
 			}
 		}
 	}
