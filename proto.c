@@ -453,35 +453,50 @@ process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 void
 ctrl_sock_input(struct vpn_state *vpn)
 {
+	int		dgrams_remaining;
 	struct vpn_msg	msg;
 	ssize_t		data_len;
 
+	dgrams_remaining = vpn->max_reads_per_event;
 	msg.type = DATA;
-	data_len = read(vpn->ctrl_sock, msg.data, sizeof(msg.data));
-	if (data_len >= 0) {
-		if (tx_encrypted(vpn, &msg, data_len))
-			vpn->tx_data_bytes += data_len;
-	} else {
-		log_msg(vpn, LOG_ERR, "%s: error reading from tunnel interface -- %s",
-			VPN_STATE_STR(vpn->state), strerror(errno));
-	}
 
+	while (dgrams_remaining > 0) {
+		data_len = read(vpn->ctrl_sock, msg.data, sizeof(msg.data));
+		if (data_len >= 0) {
+			dgrams_remaining--;
+			if (tx_encrypted(vpn, &msg, data_len))
+				vpn->tx_data_bytes += data_len;
+			if (dgrams_remaining == 0) {
+				vpn->ctrl_sock_rx_per_event_hi_water = vpn->max_reads_per_event;
+				vpn->ctrl_sock_rx_per_event_max_reached++;
+			}
+		} else {
+			if (errno == EAGAIN) {
+				uint32_t ct = vpn->max_reads_per_event - dgrams_remaining;
+				if (ct > vpn->ctrl_sock_rx_per_event_hi_water)
+					vpn->ctrl_sock_rx_per_event_hi_water = ct;
+				dgrams_remaining = 0;
+			} else {
+				log_msg(vpn, LOG_ERR, "%s: error reading from tunnel interface -- %s",
+				    VPN_STATE_STR(vpn->state), strerror(errno));
+			}
+		}
+	}
 }
 
 void
 ext_sock_input(struct vpn_state *vpn)
 {
+	int		dgrams_remaining;
 	bool		ok;
 	unsigned char	ciphertext[crypto_box_MACBYTES + sizeof(struct vpn_msg)];
 	struct vpn_msg	msg;
-	size_t		rx_len , ciphertext_len;
+	ssize_t		rx_len , ciphertext_len;
 	unsigned char	rx_nonce[crypto_box_NONCEBYTES];
 	struct msghdr	msghdr = {0};
 	struct sockaddr_storage peer_addr;
 	struct iovec	rx_iovec[2];
 	size_t		data_len;
-
-	ok = true;
 
 	if (vpn->role == HOST_GW && vpn->state == HOST_WAIT) {
 		/* Unconnected socket, peer address will be available. */
@@ -500,61 +515,76 @@ ext_sock_input(struct vpn_state *vpn)
 	rx_iovec[1].iov_base = ciphertext;
 	rx_iovec[1].iov_len = sizeof(ciphertext);
 
-	if ((rx_len = recvmsg(vpn->ext_sock, &msghdr, 0)) == -1) {
-		ok = false;
-		/*
-		 * Ignore ECONNREFUSED because it's expected when sending on
-		 * a connected socket and the peer is not available. The
-		 * other host responds with an ICMP "port unreachable" that
-		 * doesn't warrant an error message.
-		 */
-		if (errno != ECONNREFUSED)
-			log_msg(vpn, LOG_ERR, "%s: recvmsg failed from tunnel socket -- %s (%d)",
-			 VPN_STATE_STR(vpn->state), strerror(errno), errno);
-	}
-	if (ok) {
-		ok = check_nonce(vpn, rx_nonce);
-	}
-	if (ok) {
-		ciphertext_len = rx_len - sizeof(rx_nonce);
-		if (crypto_box_open_easy_afternm((unsigned char *)&msg, ciphertext,
-		      ciphertext_len, rx_nonce, vpn->cur_shared_key) != 0) {
-			ok = false;
-			vpn->decrypt_failures++;
+	while (dgrams_remaining > 0) {
+		if ((rx_len = recvmsg(vpn->ext_sock, &msghdr, 0)) >= 0) {
+			dgrams_remaining--;
+
+			ok = check_nonce(vpn, rx_nonce);
+			if (ok) {
+				ciphertext_len = rx_len - sizeof(rx_nonce);
+				if (crypto_box_open_easy_afternm((unsigned char *)&msg, ciphertext,
+					ciphertext_len, rx_nonce, vpn->cur_shared_key) != 0) {
+					ok = false;
+					vpn->decrypt_failures++;
+				} else {
+					memcpy(vpn->remote_nonce, rx_nonce, sizeof(vpn->remote_nonce));
+				}
+			}
+			if (ok) {
+				vpn->rx_packets++;
+				data_len = ciphertext_len - crypto_box_MACBYTES - sizeof(msg.type);
+
+				if (msg.type != DATA)
+					log_msg(vpn, LOG_DEBUG, "%s: received %s", VPN_STATE_STR(vpn->state),
+					    MSG_TYPE_STR(msg.type));
+
+				switch (msg.type) {
+				case PEER_INFO:
+					process_peer_info(vpn, &msg, (struct sockaddr *)&peer_addr, msghdr.msg_namelen);
+					break;
+				case KEY_SWITCH_START:
+					process_key_switch_start(vpn, &msg);
+					break;
+				case KEY_SWITCH_ACK:
+					process_key_switch_ack(vpn, &msg);
+					break;
+				case KEY_READY:
+					process_key_ready(vpn, &msg);
+					break;
+				case DEBUG_STRING:
+					process_debug_string(vpn, &msg, data_len);
+					break;
+				case DATA:
+					process_rx_data(vpn, &msg, data_len);
+					break;
+				default:
+					log_msg(vpn, LOG_ERR, "%s: unknown message type %d",
+					    VPN_STATE_STR(vpn->state), msg.type);
+				}
+			}
+			if (dgrams_remaining == 0) {
+				vpn->ext_sock_rx_per_event_hi_water = vpn->max_reads_per_event;
+				vpn->ext_sock_rx_per_event_max_reached++;
+			}
 		} else {
-			memcpy(vpn->remote_nonce, rx_nonce, sizeof(vpn->remote_nonce));
-		}
-	}
-	if (ok) {
-		vpn->rx_packets++;
-		data_len = ciphertext_len - crypto_box_MACBYTES - sizeof(msg.type);
-
-		if (msg.type != DATA)
-			log_msg(vpn, LOG_DEBUG, "%s: received %s", VPN_STATE_STR(vpn->state),
-				MSG_TYPE_STR(msg.type));
-
-		switch (msg.type) {
-		case PEER_INFO:
-			process_peer_info(vpn, &msg, (struct sockaddr *)&peer_addr, msghdr.msg_namelen);
-			break;
-		case KEY_SWITCH_START:
-			process_key_switch_start(vpn, &msg);
-			break;
-		case KEY_SWITCH_ACK:
-			process_key_switch_ack(vpn, &msg);
-			break;
-		case KEY_READY:
-			process_key_ready(vpn, &msg);
-			break;
-		case DEBUG_STRING:
-			process_debug_string(vpn, &msg, data_len);
-			break;
-		case DATA:
-			process_rx_data(vpn, &msg, data_len);
-			break;
-		default:
-			log_msg(vpn, LOG_ERR, "%s: unknown message type %d",
-				VPN_STATE_STR(vpn->state), msg.type);
+			/*
+			 * Ignore ECONNREFUSED because it's expected when sending on
+			 * a connected socket and the peer is not available. The
+			 * other host responds with an ICMP "port unreachable" that
+			 * doesn't warrant an error message.
+			 */
+			if (errno != ECONNREFUSED)
+				log_msg(vpn, LOG_ERR, "%s: recvmsg failed from tunnel socket -- %s (%d)",
+				    VPN_STATE_STR(vpn->state), strerror(errno), errno);
+			else if (errno == EAGAIN) {
+				uint32_t ct = vpn->max_reads_per_event - dgrams_remaining;
+				if (ct > vpn->ext_sock_rx_per_event_hi_water)
+					vpn->ext_sock_rx_per_event_hi_water = ct;
+				dgrams_remaining = 0;
+			} else {
+				ok = false;
+				fprintf(stderr, "recvmsg: %s\n", strerror(errno));
+			}
 		}
 	}
 }

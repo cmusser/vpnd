@@ -293,6 +293,7 @@ struct vpn_state {
 	struct timespec	peer_last_heartbeat_ts;
 	uint32_t	key_sent_packet_count;
 	uint32_t	max_key_sent_packet_count;
+	uint32_t	max_reads_per_event;
 	uint32_t	max_key_age_secs;
 	unsigned char	new_secret_key[crypto_box_SECRETKEYBYTES];
 	unsigned char	new_public_key[crypto_box_PUBLICKEYBYTES];
@@ -332,6 +333,10 @@ struct vpn_state {
 	uint32_t	keys_used;
 	uint32_t	sess_starts;
 	uint32_t	decrypt_failures;
+	uint32_t	ctrl_sock_rx_per_event_hi_water;
+	uint32_t	ctrl_sock_rx_per_event_max_reached;
+	uint32_t	ext_sock_rx_per_event_hi_water;
+	uint32_t	ext_sock_rx_per_event_max_reached;
 	bool		peer_died;
 };
 

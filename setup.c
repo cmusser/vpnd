@@ -39,6 +39,7 @@ struct config_param {
 };
 
 char           *get_value(char *line, size_t len);
+bool		set_nonblocking(struct vpn_state *vpn, int fd, char *desc);
 
 char           *
 get_value(char *line, size_t len)
@@ -68,6 +69,28 @@ get_value(char *line, size_t len)
 }
 
 bool
+set_nonblocking(struct vpn_state *vpn, int fd, char *desc) {
+	bool	ok = true;
+	int	fd_flags;
+
+	if ((fd_flags = fcntl(fd, F_GETFL, 0)) == -1) {
+		ok = false;
+		log_msg(vpn, LOG_ERR, "can't get flags for %s: %s\n",
+		    desc, strerror(errno));
+	}
+
+	if (ok) {
+		if (fcntl(fd, F_SETFL, fd_flags | O_NONBLOCK) == -1) {
+			ok = false;
+			log_msg(vpn, LOG_ERR, "setting nonblocking failed for %s: %s\n",
+			    desc, strerror(errno));
+		}
+	}
+
+	return ok;
+}
+
+bool
 init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config_fname)
 {
 	bool		ok = true;
@@ -88,6 +111,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 	char		resolv_domain[32] = {'\0'};
 	char		max_key_age_secs[16] = {'\0'};
 	char		max_key_sent_packet_count[16] = {'\0'};
+	char		max_read_per_event[16] = {'\0'};
 	char		nonce_reset_incr[16] = {'\0'};
 	const char     *num_err;
 	struct config_param c[] = {
@@ -123,6 +147,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		max_key_age_secs, sizeof(max_key_age_secs), "60"},
 		{"max key packets", "max_key_packets:", sizeof("max_key_packets:"),
 		max_key_sent_packet_count, sizeof(max_key_sent_packet_count), "100000"},
+		{"max reads per event", "max_read_per_event:", sizeof("max_read_per_event:"),
+		max_read_per_event, sizeof(max_read_per_event), "100"},
 		{"nonce reset increment", "nonce_reset_incr:", sizeof("nonce_reset_incr:"),
 		nonce_reset_incr, sizeof(nonce_reset_incr), "10000"},
 		{"local nonce file", "local_nonce_file:", sizeof("local_nonce_file:"),
@@ -385,6 +411,15 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 			}
 		}
 		if (ok) {
+			vpn->max_reads_per_event = strtonum(
+			max_read_per_event, 1, 10000, &num_err);
+			if (num_err) {
+				ok = false;
+				log_msg(vpn, LOG_ERR, "invalid max reads per event: %s",
+					num_err);
+			}
+		}
+		if (ok) {
 			vpn->nonce_incr_count = 0;
 			vpn->nonce_reset_incr = strtonum(
 				     nonce_reset_incr, 16, 20000, &num_err);
@@ -436,6 +471,9 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 			ok = open_tun_sock(vpn, tunnel_device);
 		}
 
+		if (ok)
+			ok = set_nonblocking(vpn, vpn->ctrl_sock, "tunnel control socket");
+
 		/* open stats socket */
 		if (ok) {
 			if ((vpn->stats_sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
@@ -486,8 +524,11 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 					strerror(errno));
 			}
 		}
+		if (ok)
+			ok = set_nonblocking(vpn, vpn->ext_sock, "external socket");
 
-		ok = init_event_processing(vpn, fflag);
+		if (ok)
+			ok = init_event_processing(vpn, fflag);
 
 		if (ok) {
 			generate_peer_id(vpn);
@@ -517,7 +558,11 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				vpn->key_ready_retransmits =
 				vpn->keys_used = vpn->sess_starts =
 				vpn->sess_active_secs = vpn->inactive_secs =
-				vpn->decrypt_failures = 0;
+				vpn->decrypt_failures =
+				vpn->ctrl_sock_rx_per_event_hi_water =
+				vpn->ctrl_sock_rx_per_event_max_reached =
+				vpn->ext_sock_rx_per_event_hi_water =
+				vpn->ext_sock_rx_per_event_max_reached = 0;
 
 			vpn->shared_key_is_ephemeral = vpn->peer_died = false;
 			vpn->late_nonces = NULL;

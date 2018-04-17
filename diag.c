@@ -133,6 +133,10 @@ log_stats(struct vpn_state *vpn)
 		"bad nonces: %" PRIu32 "\n"
 		"nonces since reset: %" PRIu32 "\n"
 		"decrypt failures: %" PRIu32 "\n"
+		"control socket rx hi water: %" PRIu32 "\n"
+		"control socket rx max reached: %" PRIu32 "\n"
+		"external socket rx hi water: %" PRIu32 "\n"
+		"external socket rx max reached: %" PRIu32 "\n"
 		"retransmits (pi/kss/ksa/kr): %" PRIu32
 		"/%" PRIu32 "/%" PRIu32 "/%" PRIu32 "\n"
 		"last peer message: %" PRIu32 " sec. ago\n",
@@ -149,6 +153,10 @@ log_stats(struct vpn_state *vpn)
 		vpn->rx_packets, vpn->tx_packets,
 	   vpn->rx_late_packets, cur_key_late_packets(vpn), vpn->bad_nonces,
 		vpn->nonce_incr_count, vpn->decrypt_failures,
+	    vpn->ctrl_sock_rx_per_event_hi_water,
+	    vpn->ctrl_sock_rx_per_event_max_reached,
+	    vpn->ext_sock_rx_per_event_hi_water,
+	    vpn->ext_sock_rx_per_event_max_reached,
 	      vpn->peer_init_retransmits, vpn->key_switch_start_retransmits,
 		vpn->key_switch_ack_retransmits,
 		vpn->key_ready_retransmits,
@@ -227,6 +235,10 @@ tx_graphite_stats(struct vpn_state *vpn, int client_fd)
 	    "%s.vpnd.rx._cur_key_late %" PRIu32 " %lld\n"
 	    "%s.vpnd.bad_nonces %" PRIu32 " %lld\n"
 	    "%s.vpnd.decrypt_failures %" PRIu32 " %lld\n"
+	    "%s.vpnd.ctrl_sock_rx_per_event_hi_water %" PRIu32 " %lld\n"
+	    "%s.vpnd.ctrl_sock_rx_per_event_max_reached %" PRIu32 " %lld\n"
+	    "%s.vpnd.ext_sock_rx_per_event_hi_water %" PRIu32 " %lld\n"
+	    "%s.vpnd.ext_sock_rx_per_event_max_reached %" PRIu32 " %lld\n"
 	    "%s.vpnd.peer_info_retransmits %" PRIu32 " %lld\n"
 	    "%s.vpnd.key_switch_start_retransmits %" PRIu32 " %lld\n"
 	    "%s.vpnd.key_ack_retransmits %" PRIu32 " %lld\n"
@@ -241,6 +253,10 @@ tx_graphite_stats(struct vpn_state *vpn, int client_fd)
 	    vpn->stats_prefix, cur_key_late_packets(vpn), now,
 	    vpn->stats_prefix, vpn->bad_nonces, now,
 	    vpn->stats_prefix, vpn->decrypt_failures, now,
+	    vpn->stats_prefix, vpn->ctrl_sock_rx_per_event_hi_water, now,
+	    vpn->stats_prefix, vpn->ctrl_sock_rx_per_event_max_reached, now,
+	    vpn->stats_prefix, vpn->ext_sock_rx_per_event_hi_water, now,
+	    vpn->stats_prefix, vpn->ext_sock_rx_per_event_max_reached, now,
 	    vpn->stats_prefix, vpn->peer_init_retransmits, now,
 	    vpn->stats_prefix, vpn->key_switch_start_retransmits, now,
 	    vpn->stats_prefix, vpn->key_switch_ack_retransmits, now,
