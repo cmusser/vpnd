@@ -113,7 +113,7 @@ per line, in the following format:
 |local_port|local UDP port to listen on|no, defaults to 4706.|
 |remote_pk|The peer's public key|yes, use values from `vpnd-keygen` program|
 |remote_host|hostname or IP address of remote peer.|yes, in `host` and `net-gw` role.|
-|remote_network|The address of the remote network.|yes, in `net-gw` role. Specified in CIDR notation, ie 192.168.1.0/24|
+|remote_network|In `net-gw` mode, the address of the remote network.|no,  defaults to unconfigured. Specified in CIDR notation, ie 192.168.1.0/24|
 |local_network|The address of the local network.|yes, in `host-gw` role. Specified in CIDR notation, ie 192.168.1.0/24|
 |host_addr|In `host-gw` mode, the address to assign to the client and the prefix length of the associated network|yes, in `host-gw` role. Specified in CIDR notation, ie 192.168.1.1/24|
 |resolv_addr|In `host-gw` mode, the address of the DNS resolver to be used by the client|no|
@@ -140,6 +140,7 @@ both networks have another host that acts as the default router.
 local_sk: <local secret key>
 remote_pk: <gateway #2 public key>
 role: net-gw
+remote_network 10.1.0.0/16
 remote_host: vpn-gw.network-2.com
 ```
 Internal network #1's default router needs to be configured with a route
@@ -153,6 +154,7 @@ to internal network #2, via its local VPN gateway:
 local_sk: <local secret key>
 remote_pk: <gateway #1 public key>
 role: net-gw
+remote_network: 172.16.0.0/16
 remote_host: vpn--gw.network-1.com
 ```
 Similar to the above, internal network #2's default router needs to
@@ -160,6 +162,11 @@ be configured with a route to internal network #1, via its local VPN
 gateway:
 
 `route add 172.16.0.0/16 10.1.0.2`
+
+Note that the `remote_network` parameter is optional. If you don't want
+vpnd to add a route to the remote network via the tunnel, omit this
+parameter and configure the networking manually as needed. This is
+a sort of "raw" mode for custom network topologies.
 
 #### Host/Host Gateway
 

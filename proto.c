@@ -53,7 +53,7 @@ generate_peer_id(struct vpn_state *vpn)
 struct timespec
 get_timeout_interval(struct vpn_state *vpn, timer_type ttype)
 {
-	struct timespec interval;
+	struct timespec	interval;
 
 	switch (ttype) {
 	case RETRANSMIT_PEER_INIT:
@@ -74,7 +74,7 @@ get_timeout_interval(struct vpn_state *vpn, timer_type ttype)
 		interval.tv_sec = 0;
 		interval.tv_nsec = 0;
 		log_msg(vpn, LOG_WARNING, "no interval for %s timer type",
-		    TIMER_TYPE_STR(ttype));
+			TIMER_TYPE_STR(ttype));
 	}
 
 	return interval;
@@ -719,7 +719,7 @@ process_timeout(struct vpn_state *vpn, uintptr_t timer_id)
 			break;
 		default:
 			log_msg(vpn, LOG_ERR, "%s: unhandled timer id: %s",
-				VPN_STATE_STR(vpn->state), TIMER_TYPE_STR(timer_id));
+			VPN_STATE_STR(vpn->state), TIMER_TYPE_STR(timer_id));
 		}
 	}
 }
@@ -757,7 +757,7 @@ manage_host_networking(struct vpn_state *vpn)
 
 	switch (vpn->state) {
 	case INIT:
-		configure_route_on_host(vpn, net_addr_str, DELETE);
+		configure_route_on_host(vpn, net_addr_str, ROUTE_DELETE);
 		if (manage_resolver)
 			snprintf(resolvconf_cmd, sizeof(resolvconf_cmd), "%s -d %s 2>&1",
 				 vpn->resolvconf_path, vpn->tun_name);
@@ -766,7 +766,7 @@ manage_host_networking(struct vpn_state *vpn)
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
 		set_tun_addrs(vpn, host_addr_str, HOST_LOCAL);
-		configure_route_on_host(vpn, net_addr_str, ADD);
+		configure_route_on_host(vpn, net_addr_str, ROUTE_ADD);
 		if (manage_resolver) {
 			snprintf(resolv_data_filename, sizeof(resolv_data_filename),
 			       "/tmp/vpnd_resolv_%s.XXXXXX", vpn->tun_name);
@@ -856,14 +856,6 @@ manage_host_gw_networking(struct vpn_state *vpn)
 void
 manage_net_gw_networking(struct vpn_state *vpn)
 {
-	char		remote_network_str[INET6_ADDRSTRLEN];
-
-	if (inet_ntop(vpn->remote_network_family, vpn->remote_network, remote_network_str,
-		      sizeof(remote_network_str)) == NULL) {
-		log_msg(vpn, LOG_WARNING, "%s: remote network address unconfigured or invalid",
-			VPN_ROLE_STR(vpn->role));
-		return;
-	}
 	switch (vpn->state) {
 	case INIT:
 		if (!vpn->already_ip_forwarding)
@@ -871,16 +863,16 @@ manage_net_gw_networking(struct vpn_state *vpn)
 		if (!vpn->already_ip6_forwarding)
 			set_forwarding(vpn, AF_INET6, false);
 
-		set_tun_state(vpn, DOWN);
-		configure_route_on_net_gw(vpn, remote_network_str, DELETE);
+		set_tun_state(vpn, INTF_DOWN);
+		configure_route_on_net_gw(vpn, ROUTE_DELETE);
 		break;
 
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
 		set_forwarding(vpn, AF_INET, true);
 		set_forwarding(vpn, AF_INET6, true);
-		set_tun_state(vpn, UP);
-		configure_route_on_net_gw(vpn, remote_network_str, ADD);
+		set_tun_state(vpn, INTF_UP);
+		configure_route_on_net_gw(vpn, ROUTE_ADD);
 		break;
 
 	default:

@@ -47,7 +47,7 @@ open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 	}
 	if (ok) {
 		strlcpy(vpn->tun_name, ifr.ifr_name, sizeof(vpn->tun_name));
-		set_tun_state(vpn, UP);
+		set_tun_state(vpn, INTF_UP);
 	}
 	return ok;
 }
@@ -260,11 +260,11 @@ set_tun_state(struct vpn_state *vpn, intf_action action)
 	char		cmd       [256] = {'\0'};
 
 	switch (action) {
-	case UP:
+	case INTF_UP:
 		snprintf(cmd, sizeof(cmd), "/usr/bin/ip link set %s  up",
 			 vpn->tun_name);
 		break;
-	case DOWN:
+	case INTF_DOWN:
 		snprintf(cmd, sizeof(cmd), "/usr/bin/ip link set %s down",
 			 vpn->tun_name);
 		break;
@@ -284,11 +284,11 @@ configure_route_on_host(struct vpn_state *vpn, char *net_addr_str, route_action 
 	char		cmd       [256] = {'\0'};
 
 	switch (action) {
-	case ADD:
+	case ROUTE_ADD:
 		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route add %s/%u dev %s",
 			 net_addr_str, vpn->rx_peer_info.host_prefix_len, vpn->tun_name);
 		break;
-	case DELETE:
+	case ROUTE_DELETE:
 		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route delete %s/%u dev %s",
 			 net_addr_str, vpn->rx_peer_info.host_prefix_len, vpn->tun_name);
 		break;
@@ -303,27 +303,27 @@ configure_route_on_host(struct vpn_state *vpn, char *net_addr_str, route_action 
 }
 
 void
-configure_route_on_net_gw(struct vpn_state *vpn, char *remote_network_str, route_action action)
+configure_route_on_net_gw(struct vpn_state *vpn, route_action action)
 {
+	char		route_dst_str[INET6_ADDRSTRLEN + 4] = {'\0'};
 	char		cmd       [256] = {'\0'};
 
 	switch (action) {
-	case ADD:
-		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route add %s/%u dev %s",
-			 remote_network_str, vpn->remote_network_prefix_len, vpn->tun_name);
-		break;
-	case DELETE:
-		snprintf(cmd, sizeof(cmd), "/usr/bin/ip route delete %s/%u dev %s",
-			 remote_network_str, vpn->remote_network_prefix_len, vpn->tun_name);
+	case ROUTE_ADD:
+	case ROUTE_DELETE:
+		if (validate_route_dst(vpn, vpn->remote_network_family,
+			vpn->remote_network, vpn->remote_network_prefix_len,
+				    route_dst_str, sizeof(route_dst_str))) {
+			snprintf(cmd, sizeof(cmd), "/usr/bin/ip route %s %s dev %s",
+				 ROUTE_ACTION_STR(action), route_dst_str, vpn->tun_name);
+			spawn_subprocess(vpn, cmd);
+			log_msg(vpn, LOG_NOTICE, "%s route %s: %s",
+				VPN_ROLE_STR(vpn->role), ROUTE_ACTION_STR(action), cmd);
+		}
 		break;
 	default:
-		log_msg(vpn, LOG_WARNING, "%s route action (%d)",
-			ROUTE_ACTION_STR(action), action);
-		return;
+		log_msg(vpn, LOG_WARNING, "unknown route action (%d)", action);
 	}
-	spawn_subprocess(vpn, cmd);
-	log_msg(vpn, LOG_NOTICE, "%s route %s: %s",
-		VPN_ROLE_STR(vpn->role), ROUTE_ACTION_STR(action), cmd);
 }
 
 void

@@ -20,7 +20,7 @@
 
 #include "uthash.h"
 
-#define VPND_VERSION "1.1.3"
+#define VPND_VERSION "1.1.4"
 
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
 
@@ -184,7 +184,7 @@ typedef enum {
 	HOST_LOCAL,
 	HOST_REMOTE,
 	TUN_ADDR_MODE_LAST_PLUS_ONE,
-}	tun_addr_mode;
+}		tun_addr_mode;
 
 #ifdef _DECL_STRINGS_
 const char     *tun_addr_mode_string_array[TUN_ADDR_MODE_LAST_PLUS_ONE] =
@@ -202,10 +202,10 @@ extern const char *tun_addr_mode_string_array[];
 
 /* Interface actions. */
 typedef enum {
-	UP,
-	DOWN,
+	INTF_UP,
+	INTF_DOWN,
 	INTF_ACTION_LAST_PLUS_ONE,
-}	intf_action;
+}		intf_action;
 
 #ifdef _DECL_STRINGS_
 const char     *intf_action_string_array[INTF_ACTION_LAST_PLUS_ONE] =
@@ -223,10 +223,10 @@ extern const char *intf_action_string_array[];
 
 /* Route actions */
 typedef enum {
-	ADD,
-	DELETE,
+	ROUTE_ADD,
+	ROUTE_DELETE,
 	ROUTE_ACTION_LAST_PLUS_ONE,
-}	route_action;
+}		route_action;
 
 #ifdef _DECL_STRINGS_
 const char     *route_action_string_array[ROUTE_ACTION_LAST_PLUS_ONE] =
@@ -245,11 +245,11 @@ extern const char *route_action_string_array[];
 
 struct vpn_peer_info {
 	uint32_t	peer_id;
-	uint8_t	host_addr_family;
+	uint8_t		host_addr_family;
 	uint8_t		host_prefix_len;
-	uint8_t	remote_net_addr_family;
+	uint8_t		remote_net_addr_family;
 	uint8_t		remote_net_prefix_len;
-	uint8_t	resolv_addr_family;
+	uint8_t		resolv_addr_family;
 	unsigned char	host_addr[sizeof(struct in6_addr)];
 	unsigned char	remote_net[sizeof(struct in6_addr)];
 	unsigned char	resolv_addr[sizeof(struct in6_addr)];

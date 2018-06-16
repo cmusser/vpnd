@@ -110,7 +110,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		{"host address", "host_addr:", sizeof("host_addr:"),
 		host_addr, sizeof(host_addr), NULL},
 		{"remote network", "remote_network:", sizeof("remote_network:"),
-		remote_network, sizeof(remote_network), NULL},
+		remote_network, sizeof(remote_network), ""},
 		{"local network", "local_network:", sizeof("local_network:"),
 		local_network, sizeof(local_network), NULL},
 		{"resolver address", "resolv_addr:", sizeof("resolv_addr:"),
@@ -192,17 +192,15 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		 * Ensure that all required parameters are present and, if
 		 * possible, set defaults for parameters that have them.
 		 * There is special treatment for:
-		 *
+		 * 
 		 * role: ensure the role is one of the legal values.
-		 *
+		 * 
 		 * remote_host: require in host and net gateway role
-		 *
+		 * 
 		 * host_addr: require in host gateway role.
-		 *
+		 * 
 		 * local_network: require in host gateway role.
-		 *
-		 * remote_network: require in net gateway role.
-		 *
+		 * 
 		 * stats_prefix: let the default be the hostname, which must be
 		 * computed and hence cannot be hardcoded into the array of
 		 * config parameters
@@ -213,7 +211,6 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				if (c[i].default_value == NULL) {
 					if (!(strcmp(c[i].name, "remote_host:") == 0 ||
 					      strcmp(c[i].name, "host_addr:") == 0 ||
-					      strcmp(c[i].name, "remote_network:") == 0 ||
 					      strcmp(c[i].name, "local_network:") == 0 ||
 					      strcmp(c[i].name, "resolv_addr:") == 0 ||
 					      strcmp(c[i].name, "resolv_domain:") == 0)) {
@@ -240,11 +237,10 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		if (strcmp(role, "net-gw") == 0) {
 			vpn->role = NET_GW;
 			if (strlen(remote_network) == 0) {
-				ok = false;
-				log_msg(vpn, LOG_ERR, "remote network must be "
-					"specified when in \"%s\" role", VPN_ROLE_STR(vpn->role));
-			}
-			if (ok) {
+				vpn->remote_network_family = AF_UNSPEC;
+				vpn->remote_network_prefix_len = 0;
+				bzero(&vpn->remote_network, sizeof(vpn->remote_network));
+			} else {
 				if ((prefix_start = strchr(remote_network, '/')) != NULL) {
 					*prefix_start = '\0';
 					prefix_start++;
@@ -253,22 +249,22 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 					log_msg(vpn, LOG_ERR, "can't find prefix in "
 						"remote network");
 				}
-			}
-			if (ok) {
-				printf("remote_network: %s\n", remote_network);
-				vpn->remote_network_family = inet_pton_any(vpn, remote_network,
+				if (ok) {
+					printf("remote_network: %s\n", remote_network);
+					vpn->remote_network_family = inet_pton_any(vpn, remote_network,
 						      &vpn->remote_network);
-				if (vpn->remote_network_family == AF_UNSPEC)
-					ok = false;
-			}
-			if (ok) {
-				max_prefix_len = (vpn->remote_network_family == AF_INET)
-					? 32 : 128;
-				vpn->remote_network_prefix_len = strtonum(prefix_start,
+					if (vpn->remote_network_family == AF_UNSPEC)
+						ok = false;
+				}
+				if (ok) {
+					max_prefix_len = (vpn->remote_network_family == AF_INET)
+						? 32 : 128;
+					vpn->remote_network_prefix_len = strtonum(prefix_start,
 						0, max_prefix_len, &errstr);
-				if (errstr) {
-					ok = false;
-					log_msg(vpn, LOG_ERR, "remote network prefix length too %s", errstr);
+					if (errstr) {
+						ok = false;
+						log_msg(vpn, LOG_ERR, "remote network prefix length too %s", errstr);
+					}
 				}
 			}
 		} else if (strcmp(role, "host-gw") == 0) {
@@ -435,7 +431,6 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		if (ok) {
 			ok = open_tun_sock(vpn, tunnel_device);
 		}
-
 		/* open stats socket */
 		if (ok) {
 			if ((vpn->stats_sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
@@ -486,7 +481,6 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 					strerror(errno));
 			}
 		}
-
 		ok = init_event_processing(vpn, fflag);
 
 		if (ok) {

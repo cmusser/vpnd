@@ -95,6 +95,29 @@ inet_pton_any(struct vpn_state *vpn, const char *src, void *dst)
 }
 
 bool
+validate_route_dst(struct vpn_state *vpn, sa_family_t family, void *addr, uint8_t prefix_len, char *route_dst_str, size_t route_dst_str_len)
+{
+	bool	ok = false;
+	char	addr_str[INET6_ADDRSTRLEN] = {'\0'};
+
+	if (family == AF_UNSPEC) {
+		log_msg(vpn, LOG_NOTICE, "%s: remote network address unspecified",
+			VPN_ROLE_STR(vpn->role));
+	} else if (prefix_len < 1) {
+		log_msg(vpn, LOG_WARNING, "%s: remote network address prefix is",
+		    VPN_ROLE_STR(vpn->role), prefix_len);
+	} else if (inet_ntop(family, addr, addr_str, sizeof(route_dst_str)) == NULL) {
+		log_msg(vpn, LOG_WARNING, "%s: remote network address invalid",
+			VPN_ROLE_STR(vpn->role));
+	} else {
+		ok = true;
+		snprintf(route_dst_str, route_dst_str_len, "%s/%d", route_dst_str, prefix_len);
+	}
+
+	return ok;
+}
+
+bool
 manage_ext_sock_connection(struct vpn_state *vpn, struct sockaddr *remote_addr, socklen_t remote_addr_len)
 {
 	bool		ok = true;

@@ -114,9 +114,11 @@ and
 .Nm net-gw
 roles.
 
-.It remote_network Ta Address of the remote network. Required in
+.It remote_network Ta Address of the remote network. For
 .Nm net-gw
-role. Specified in CIDR notation, ie 192.168.1.0/24.
+role, the address of the remote network. Specified in CIDR notation, ie 192.168.1.0/24.
+This is used for setting a route through the tunnel to the peer's network, and
+is optional. If unspecified (the default) not route will be added.
 
 .It local_network Ta Address of the local network. Required in
 .Nm host-gw
