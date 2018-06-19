@@ -245,7 +245,7 @@ configure_route_on_net_gw(struct vpn_state *vpn, route_action action)
 	case ROUTE_ADD:
 	case ROUTE_DELETE:
 		if (validate_route_dst(vpn, vpn->remote_network_family,
-			vpn->remote_network, vpn->remote_network_prefix_len,
+			&vpn->remote_network, vpn->remote_network_prefix_len,
 				    route_dst_str, sizeof(route_dst_str))) {
 			snprintf(cmd, sizeof(cmd), "/sbin/route %s %s %s-interface %s",
 			ROUTE_ACTION_STR(action), route_dst_str, route_param,

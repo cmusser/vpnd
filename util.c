@@ -106,12 +106,12 @@ validate_route_dst(struct vpn_state *vpn, sa_family_t family, void *addr, uint8_
 	} else if (prefix_len < 1) {
 		log_msg(vpn, LOG_WARNING, "%s: remote network address prefix is",
 		    VPN_ROLE_STR(vpn->role), prefix_len);
-	} else if (inet_ntop(family, addr, addr_str, sizeof(route_dst_str)) == NULL) {
-		log_msg(vpn, LOG_WARNING, "%s: remote network address invalid",
-			VPN_ROLE_STR(vpn->role));
+	} else if (inet_ntop(family, addr, addr_str, sizeof(addr_str)) == NULL) {
+		log_msg(vpn, LOG_WARNING, "%s: remote network address %s invalid",
+			VPN_ROLE_STR(vpn->role), addr_str);
 	} else {
 		ok = true;
-		snprintf(route_dst_str, route_dst_str_len, "%s/%d", route_dst_str, prefix_len);
+		snprintf(route_dst_str, route_dst_str_len, "%s/%d", addr_str, prefix_len);
 	}
 
 	return ok;
