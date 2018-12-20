@@ -68,9 +68,9 @@ write_nonce(struct vpn_state *vpn, nonce_type type)
 		if (type == LOCAL) {
 			sodium_add(output_nonce, vpn->nonce_reset_incr_bin,
 				   sizeof(output_nonce));
-			log_nonce(vpn, "create nonce reset point", output_nonce);
+			log_nonce(vpn, "create nonce reset point", type, output_nonce);
 		} else {
-			log_nonce(vpn, "storing remote nonce", output_nonce);
+			log_nonce(vpn, "storing remote nonce", type, output_nonce);
 		}
 		if (fwrite(output_nonce, sizeof(output_nonce), 1, f) < 1) {
 			ok = false;

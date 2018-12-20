@@ -735,7 +735,7 @@ manage_host_networking(struct vpn_state *vpn)
 	int		resolv_data_fd;
 	char		resolv_data_str[256];
 	char		resolv_addr_str[INET6_ADDRSTRLEN];
-	char		resolvconf_cmd[512];
+	char		resolvconf_cmd[1024];
 	FILE           *cmd_fd;
 	char		cmd_out   [256];
 	char           *newline;

@@ -76,11 +76,16 @@ log_invalid_msg_for_state(struct vpn_state *vpn, message_type msg_type)
 }
 
 void
-log_nonce(struct vpn_state *vpn, char *prefix, unsigned char *nonce)
+log_nonce(struct vpn_state *vpn, char *prefix, nonce_type type, unsigned char *nonce)
 {
 	char		nonce_str [(crypto_box_NONCEBYTES * 2) + 1] = {'\0'};
+	char           *nonce_filename;
 
-	log_msg(vpn, LOG_NOTICE, "%s: %s %s)", VPN_ROLE_STR(vpn->role), prefix,
+	nonce_filename = (type == LOCAL) ? vpn->local_nonce_filename
+	    : vpn->remote_nonce_filename;
+
+	log_msg(vpn, LOG_NOTICE, "%s: %s (from %s) %s)", VPN_ROLE_STR(vpn->role), prefix,
+		nonce_filename,
 		sodium_bin2hex(nonce_str, sizeof(nonce_str), nonce, crypto_box_NONCEBYTES));
 }
 

@@ -486,20 +486,20 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		if (ok) {
 			generate_peer_id(vpn);
 			if (read_nonce(vpn, LOCAL)) {
-				log_nonce(vpn, "read nonce reset point", vpn->nonce);
+				log_nonce(vpn, "read nonce reset point", LOCAL, vpn->nonce);
 			} else {
 				randombytes_buf(vpn->nonce, sizeof(vpn->nonce));
-				log_nonce(vpn, "generating initial nonce", vpn->nonce);
+				log_nonce(vpn, "generating initial nonce", LOCAL, vpn->nonce);
 			}
 			write_nonce(vpn, LOCAL);
 
 			if (read_nonce(vpn, REMOTE)) {
 				log_nonce(vpn, "read remote nonce reset point",
-					  vpn->remote_nonce);
+				    REMOTE, vpn->remote_nonce);
 			} else {
 				bzero(vpn->remote_nonce, sizeof(vpn->remote_nonce));
 				log_nonce(vpn, "initializing remote nonce",
-					  vpn->remote_nonce);
+				    REMOTE, vpn->remote_nonce);
 			}
 
 			vpn->rx_data_bytes = vpn->rx_packets = vpn->rx_late_packets =
