@@ -84,7 +84,7 @@ log_nonce(struct vpn_state *vpn, char *prefix, nonce_type type, unsigned char *n
 	nonce_filename = (type == LOCAL) ? vpn->local_nonce_filename
 	    : vpn->remote_nonce_filename;
 
-	log_msg(vpn, LOG_NOTICE, "%s: %s (from %s) %s)", VPN_ROLE_STR(vpn->role), prefix,
+	log_msg(vpn, LOG_NOTICE, "%s: %s (%s) %s)", VPN_ROLE_STR(vpn->role), prefix,
 		nonce_filename,
 		sodium_bin2hex(nonce_str, sizeof(nonce_str), nonce, crypto_box_NONCEBYTES));
 }
