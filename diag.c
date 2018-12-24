@@ -45,8 +45,7 @@ log_msg(struct vpn_state *vpn, int priority, const char *msg,...)
 			localtime_r(&now, &now_tm);
 			strftime(timestamp_str, sizeof(timestamp_str), "%c", &now_tm);
 			vsnprintf(msg_str, sizeof(msg_str), msg, ap);
-			fprintf(stderr, "%s %s", timestamp_str, msg_str);
-			fprintf(stderr, "\n");
+			printf("%s %s\n", timestamp_str, msg_str);
 		}
 	} else {
 		vsyslog(priority, msg, ap);

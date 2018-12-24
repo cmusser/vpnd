@@ -585,21 +585,24 @@ stdin_input(struct vpn_state *vpn)
 
 	msg.type = DEBUG_STRING;
 	tx_data = (char *)msg.data;
-	fgets(tx_data, sizeof(msg.data) - 1, stdin);
-
-	if (strcmp(tx_data, "\n") == 0) {
-		/* Do nothing. No sense in sending a blank line. */
-	} else if (strcmp(tx_data, "stats\n") == 0) {
-		log_stats(vpn);
+	if (fgets(tx_data, sizeof(msg.data) - 1, stdin) == NULL) {
+		log_msg(vpn, LOG_NOTICE, "received EOF on stdin");
+		fclose(stdin);
 	} else {
-		last_char = &tx_data[strlen(tx_data) - 1];
-		if (*last_char == '\n')
-			*last_char = '\0';
-		data_len = strlen(tx_data) + sizeof(char);
-		if (tx_encrypted(vpn, &msg, data_len))
-			vpn->tx_data_bytes += data_len;
-	}
+		if (strcmp(tx_data, "\n") == 0) {
+			/* Do nothing. No sense in sending a blank line. */
+		} else if (strcmp(tx_data, "stats\n") == 0) {
+			log_stats(vpn);
+		} else {
+			last_char = &tx_data[strlen(tx_data) - 1];
+			if (*last_char == '\n')
+				*last_char = '\0';
+			data_len = strlen(tx_data) + sizeof(char);
+			if (tx_encrypted(vpn, &msg, data_len))
+				vpn->tx_data_bytes += data_len;
+		}
 
+	}
 }
 
 bool

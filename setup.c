@@ -144,6 +144,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 	struct sockaddr_un stats_addr;
 	char           *stats_path = "/var/run/vpnd_stats.sock";
 
+	setlinebuf(stdout);
+
 	bzero(vpn, sizeof(struct vpn_state));
 
 	switch (vflag) {
