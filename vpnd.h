@@ -20,7 +20,7 @@
 
 #include "uthash.h"
 
-#define VPND_VERSION "1.1.6"
+#define VPND_VERSION "1.1.7"
 
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
 
@@ -273,6 +273,7 @@ struct vpn_state {
 	char		local_nonce_filename[256];
 	char		remote_nonce_filename[256];
 	char		resolvconf_path[256];
+	char		ip_path[32];
 	bool		already_ip_forwarding;
 	bool		already_ip6_forwarding;
 	bool		shared_key_is_ephemeral;

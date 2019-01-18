@@ -119,6 +119,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		resolv_domain, sizeof(resolv_domain), NULL},
 		{"resolvconf path", "resolvconf_path:", sizeof("resolvconf_path:"),
 		vpn->resolvconf_path, sizeof(vpn->resolvconf_path), "/sbin/resolvconf"},
+		{"ip path", "ip_path:", sizeof("ip_path:"),
+		vpn->ip_path, sizeof(vpn->ip_path), "/sbin/ip"},
 		{"max key age (secs.)", "max_key_age:", sizeof("max_key_age:"),
 		max_key_age_secs, sizeof(max_key_age_secs), "60"},
 		{"max key packets", "max_key_packets:", sizeof("max_key_packets:"),

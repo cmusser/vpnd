@@ -119,6 +119,7 @@ per line, in the following format:
 |resolv_addr|In `host-gw` mode, the address of the DNS resolver to be used by the client|no|
 |resolv_domain|In `host-gw` mode, the DNS search domain to be used by the client|no|
 |resolvconf_path|In `host` mode, the path to the `resolvconf` utility|no, defaults to `/sbin/resolvconf`|
+|ip_path|On Linux, the path to the `ip` utility|no, defaults to `/sbin/ip`|
 |remote_port|UDP port on peer to listen on|no, defaults to 4706.|
 |max_key_age|Maximum age for ephemeral key, in seconds.|no, defaults to 60 seconds. Range is 30-3,600|
 |max_key_packets|Maximum number of packets that can be sent with ephemeral key|no, defaults to 100,000. Range is 5000-10,000,000|

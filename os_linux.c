@@ -231,17 +231,17 @@ set_tun_addrs(struct vpn_state *vpn, char *host_addr_str, tun_addr_mode mode)
 
 	switch (mode) {
 	case HOST_LOCAL:
-		snprintf(cmd, sizeof(cmd), "/bin/ip addr add %s dev %s",
-			 host_addr_str, vpn->tun_name);
+		snprintf(cmd, sizeof(cmd), "%s addr add %s dev %s",
+			vpn->ip_path, host_addr_str, vpn->tun_name);
 		spawn_subprocess(vpn, cmd);
 		break;
 	case HOST_REMOTE:
-		snprintf(cmd, sizeof(cmd), "/bin/ip addr add 127.0.0.1 dev %s",
-			 vpn->tun_name);
+		snprintf(cmd, sizeof(cmd), "%s addr add 127.0.0.1 dev %s",
+			vpn->ip_path, vpn->tun_name);
 		spawn_subprocess(vpn, cmd);
 
-		snprintf(cmd, sizeof(cmd), "/bin/ip route add %s dev %s",
-			 host_addr_str, vpn->tun_name);
+		snprintf(cmd, sizeof(cmd), "%s route add %s dev %s",
+			 vpn->ip_path, host_addr_str, vpn->tun_name);
 		spawn_subprocess(vpn, cmd);
 		break;
 	default:
@@ -261,12 +261,12 @@ set_tun_state(struct vpn_state *vpn, intf_action action)
 
 	switch (action) {
 	case INTF_UP:
-		snprintf(cmd, sizeof(cmd), "/bin/ip link set %s  up",
-			 vpn->tun_name);
+		snprintf(cmd, sizeof(cmd), "%s link set %s  up",
+			vpn->ip_path, vpn->tun_name);
 		break;
 	case INTF_DOWN:
-		snprintf(cmd, sizeof(cmd), "/bin/ip link set %s down",
-			 vpn->tun_name);
+		snprintf(cmd, sizeof(cmd), "%s link set %s down",
+			 vpn->ip_path, vpn->tun_name);
 		break;
 	default:
 		log_msg(vpn, LOG_WARNING, "%s action (%d) for tunnel state",
@@ -285,12 +285,14 @@ configure_route_on_host(struct vpn_state *vpn, char *net_addr_str, route_action 
 
 	switch (action) {
 	case ROUTE_ADD:
-		snprintf(cmd, sizeof(cmd), "/bin/ip route add %s/%u dev %s",
-			 net_addr_str, vpn->rx_peer_info.host_prefix_len, vpn->tun_name);
+		snprintf(cmd, sizeof(cmd), "%s route add %s/%u dev %s",
+			 vpn->ip_path, net_addr_str, vpn->rx_peer_info.host_prefix_len,
+			 vpn->tun_name);
 		break;
 	case ROUTE_DELETE:
-		snprintf(cmd, sizeof(cmd), "/bin/ip route delete %s/%u dev %s",
-			 net_addr_str, vpn->rx_peer_info.host_prefix_len, vpn->tun_name);
+		snprintf(cmd, sizeof(cmd), "%s route delete %s/%u dev %s",
+			 vpn->ip_path, net_addr_str, vpn->rx_peer_info.host_prefix_len,
+			 vpn->tun_name);
 		break;
 	default:
 		log_msg(vpn, LOG_WARNING, "%s route action (%d)",
@@ -314,8 +316,9 @@ configure_route_on_net_gw(struct vpn_state *vpn, route_action action)
 		if (validate_route_dst(vpn, vpn->remote_network_family,
 			&vpn->remote_network, vpn->remote_network_prefix_len,
 				    route_dst_str, sizeof(route_dst_str))) {
-			snprintf(cmd, sizeof(cmd), "/bin/ip route %s %s dev %s",
-				 ROUTE_ACTION_STR(action), route_dst_str, vpn->tun_name);
+			snprintf(cmd, sizeof(cmd), "%s route %s %s dev %s",
+				 vpn->ip_path, ROUTE_ACTION_STR(action),
+				 route_dst_str, vpn->tun_name);
 			spawn_subprocess(vpn, cmd);
 			log_msg(vpn, LOG_NOTICE, "%s route %s: %s",
 				VPN_ROLE_STR(vpn->role), ROUTE_ACTION_STR(action), cmd);
