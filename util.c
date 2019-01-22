@@ -170,7 +170,7 @@ spawn_subprocess(struct vpn_state *vpn, char *cmd)
 	}
 }
 
-#if defined(__NetBSD__) || defined(__MacOSX__) || defined(__linux__)
+#if defined(__NetBSD__) || defined(__APPLE__) || defined(__linux__)
 /* $DragonFly: src/lib/libc/stdlib/strtonum.c,v 1.2 2006/09/28 17:20:45 corecode Exp $ */
 /*	$OpenBSD: strtonum.c,v 1.6 2004/08/03 19:38:01 millert Exp $	*/
 

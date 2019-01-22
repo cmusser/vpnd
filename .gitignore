@@ -2,6 +2,7 @@ vpnd
 vpnd-keygen
 *.BAK
 *.conf
+*.DSYM
 *.keypair
 *.nonce
 cscope.out
