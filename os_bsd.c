@@ -79,11 +79,13 @@ open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 		// is our unit number -1
 
 		if (connect(vpn->ctrl_sock, (struct sockaddr *)&sc, sizeof(sc)) == -1) {
+			ok = false;
 			perror ("connect(AF_SYS_CONTROL)");
 			close(fd);
-			return -1;
 		}
 	}
+	if (ok)
+		strlcpy(vpn->tun_name, tun_name_str, sizeof(vpn->tun_name));
 
 	return ok;
 #else
