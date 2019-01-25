@@ -431,6 +431,13 @@ process_debug_string(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len
 void
 process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 {
+	struct iovec	tx_iovec[2];
+	uint32_t	af_ip = 2;
+	tx_iovec[0].iov_base = &af_ip;
+	tx_iovec[0].iov_len = sizeof(af_ip);
+	tx_iovec[1].iov_base = msg->data;
+	tx_iovec[1].iov_len = data_len;
+
 	switch (vpn->state) {
 	case MASTER_KEY_READY:
 		change_state(vpn, ACTIVE_MASTER);
@@ -439,7 +446,7 @@ process_rx_data(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len)
 	case SLAVE_KEY_SWITCHING:
 	case ACTIVE_MASTER:
 	case ACTIVE_SLAVE:
-		if (write(vpn->ctrl_sock, msg->data, data_len) < 0)
+		if (writev(vpn->ctrl_sock, tx_iovec, COUNT_OF(tx_iovec)) < 0)
 			log_msg(vpn, LOG_ERR, "%s: couldn't write to tunnel -- %s",
 				VPN_STATE_STR(vpn->state), strerror(errno));
 		else
@@ -455,9 +462,12 @@ ctrl_sock_input(struct vpn_state *vpn)
 {
 	struct vpn_msg	msg;
 	ssize_t		data_len;
+	unsigned char	data[DATA_SZ];
 
 	msg.type = DATA;
-	data_len = read(vpn->ctrl_sock, msg.data, sizeof(msg.data));
+	data_len = read(vpn->ctrl_sock, data, sizeof(data));
+	memcpy(msg.data, data + sizeof(uint32_t), data_len - sizeof(uint32_t));
+//	data_len = read(vpn->ctrl_sock, msg.data, sizeof(msg.data));
 	if (data_len >= 0) {
 		if (tx_encrypted(vpn, &msg, data_len))
 			vpn->tx_data_bytes += data_len;

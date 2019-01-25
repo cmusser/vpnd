@@ -219,7 +219,7 @@ set_tun_addrs(struct vpn_state *vpn, char *host_addr_str, tun_addr_mode mode)
 	switch (mode) {
 	case HOST_LOCAL:
 		snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s %s %s",
-		       vpn->tun_name, host_addr_str, DUMMY_REMOTE_NET_ADDR);
+		       vpn->tun_name, host_addr_str, host_addr_str);
 		break;
 	case HOST_REMOTE:
 		snprintf(cmd, sizeof(cmd), "/sbin/ifconfig %s %s %s",
