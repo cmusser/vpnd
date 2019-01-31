@@ -467,7 +467,6 @@ ctrl_sock_input(struct vpn_state *vpn)
 	msg.type = DATA;
 	data_len = read(vpn->ctrl_sock, data, sizeof(data));
 	memcpy(msg.data, data + sizeof(uint32_t), data_len - sizeof(uint32_t));
-//	data_len = read(vpn->ctrl_sock, msg.data, sizeof(msg.data));
 	if (data_len >= 0) {
 		if (tx_encrypted(vpn, &msg, data_len))
 			vpn->tx_data_bytes += data_len;
