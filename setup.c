@@ -1,5 +1,7 @@
 #ifdef __linux__
 #include <endian.h>
+#elif defined(__APPLE__)
+#include <libkern/OSByteOrder.h>
 #else
 #include <sys/endian.h>
 #endif
@@ -393,7 +395,11 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				log_msg(vpn, LOG_ERR, "invalid nonce reset increment: %s",
 					num_err);
 			} else {
+#ifdef __APPLE__
+				nonce_reset_incr_le = OSSwapHostToLittleInt32(vpn->nonce_reset_incr);
+#else
 				nonce_reset_incr_le = htole32(vpn->nonce_reset_incr);
+#endif
 				memcpy(vpn->nonce_reset_incr_bin, &nonce_reset_incr_le,
 				       sizeof(nonce_reset_incr_le));
 			}
