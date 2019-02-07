@@ -1,13 +1,16 @@
 #ifdef __linux__
 #include <endian.h>
+#elif defined(__APPLE__)
+#include <libkern/OSByteOrder.h>
 #else
-#include <machine/endian.h>
+#include <sys/endian.h>
 #endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -18,10 +21,6 @@
 #include <strings.h>
 #include <syslog.h>
 #include <unistd.h>
-
-#ifdef __APPLE__
-#include <libkern/OSByteOrder.h>
-#endif
 
 #include "diag.h"
 #include "nonce.h"

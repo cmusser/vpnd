@@ -90,30 +90,12 @@ open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 	return ok;
 #else
 	char		tun_dev_str[MAXPATHLEN];
-	int		ioctl_data;
-
 
 	snprintf(tun_dev_str, sizeof(tun_dev_str), "/dev/%s", tun_name_str);
 	vpn->ctrl_sock = open(tun_dev_str, O_RDWR);
 	if (vpn->ctrl_sock < 0) {
 		ok = false;
 		log_msg(vpn, LOG_ERR, "couldn't open tunnel: %s", strerror(errno));
-	}
-	if (ok) {
-		ioctl_data = IFF_POINTOPOINT;
-		if (ioctl(vpn->ctrl_sock, TUNSIFMODE, &ioctl_data) < 0) {
-			ok = false;
-			log_msg(vpn, LOG_ERR, "couldn't set tunnel in p-t-p mode: %s",
-				strerror(errno));
-		}
-	}
-	if (ok) {
-		ioctl_data = 0;
-		if (ioctl(vpn->ctrl_sock, TUNSIFHEAD, &ioctl_data) < 0) {
-			ok = false;
-			log_msg(vpn, LOG_ERR, "couldn't set tunnel in link-layer mode: %s",
-				strerror(errno));
-		}
 	}
 	if (ok)
 		strlcpy(vpn->tun_name, tun_name_str, sizeof(vpn->tun_name));
