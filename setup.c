@@ -1,14 +1,13 @@
 #ifdef __linux__
 #include <endian.h>
 #else
-#include <sys/endian.h>
+#include <machine/endian.h>
 #endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
-
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -19,6 +18,10 @@
 #include <strings.h>
 #include <syslog.h>
 #include <unistd.h>
+
+#ifdef __APPLE__
+#include <libkern/OSByteOrder.h>
+#endif
 
 #include "diag.h"
 #include "nonce.h"
@@ -393,7 +396,11 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 				log_msg(vpn, LOG_ERR, "invalid nonce reset increment: %s",
 					num_err);
 			} else {
+#ifdef __APPLE__
+				nonce_reset_incr_le = OSSwapHostToLittleInt32(vpn->nonce_reset_incr);
+#else
 				nonce_reset_incr_le = htole32(vpn->nonce_reset_incr);
+#endif
 				memcpy(vpn->nonce_reset_incr_bin, &nonce_reset_incr_le,
 				       sizeof(nonce_reset_incr_le));
 			}

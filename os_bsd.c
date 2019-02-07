@@ -7,6 +7,10 @@
 #include <net/if.h>
 #ifdef __DragonFly__
 #include <net/tun/if_tun.h>
+#elif defined(__APPLE__)
+#include <net/if_utun.h>
+#include <sys/sys_domain.h>
+#include <sys/kern_control.h>
 #else
 #include <net/if_tun.h>
 #endif
@@ -30,6 +34,61 @@ bool
 open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 {
 	bool		ok = true;
+#ifdef __APPLE__
+// The macOS tunnel open code is adapted from a sample by Jonathan Levin.
+
+	struct sockaddr_ctl sc;
+	struct ctl_info ctlInfo;
+	int fd;
+
+
+	memset(&ctlInfo, 0, sizeof(ctlInfo));
+	if (strlcpy(ctlInfo.ctl_name, UTUN_CONTROL_NAME, sizeof(ctlInfo.ctl_name)) >=
+	    sizeof(ctlInfo.ctl_name)) {
+		log_msg(vpn, LOG_ERR, "couldn't create control message "
+		    "(UTUN_CONTROL_NAME too long");
+		ok = false;
+	}
+
+	if (ok) {
+		fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
+
+		if (fd == -1) {
+			log_msg(vpn, LOG_ERR, "couldn't create tunnel socket");
+			ok = false;
+		}
+	}
+
+	if (ok) {
+		if (ioctl(fd, CTLIOCGINFO, &ctlInfo) == -1) {
+			log_msg(vpn, LOG_ERR, "ioctl(CTLIOCGINFO)");
+			close(fd);
+			ok = false;
+		}
+	}
+
+	if (ok) {
+		vpn->ctrl_sock = fd;
+		sc.sc_id = ctlInfo.ctl_id;
+		sc.sc_len = sizeof(sc);
+		sc.sc_family = AF_SYSTEM;
+		sc.ss_sysaddr = AF_SYS_CONTROL;
+		sc.sc_unit = 2;	/* Only have one, in this example... */
+
+		// If the connect is successful, a tun%d device will be created, where "%d"
+		// is our unit number -1
+
+		if (connect(vpn->ctrl_sock, (struct sockaddr *)&sc, sizeof(sc)) == -1) {
+			ok = false;
+			perror ("connect(AF_SYS_CONTROL)");
+			close(fd);
+		}
+	}
+	if (ok)
+		strlcpy(vpn->tun_name, tun_name_str, sizeof(vpn->tun_name));
+
+	return ok;
+#else
 	char		tun_dev_str[MAXPATHLEN];
 	int		ioctl_data;
 
@@ -60,6 +119,7 @@ open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 		strlcpy(vpn->tun_name, tun_name_str, sizeof(vpn->tun_name));
 
 	return ok;
+#endif
 }
 
 bool
@@ -264,10 +324,7 @@ configure_route_on_net_gw(struct vpn_state *vpn, route_action action)
 void
 get_cur_monotonic(struct timespec *tp)
 {
-#ifdef __MacOSX__
-#else
 	clock_gettime(CLOCK_MONOTONIC, tp);
-#endif
 }
 
 void
