@@ -77,6 +77,8 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 	char		line      [256] = {'\0'};
 	char		role      [32] = {'\0'};
 	char		tunnel_device[32] = {'\0'};
+	struct sockaddr_un stats_addr;
+	char		stats_path[sizeof(stats_addr.sun_path)] = {'\0'};
 	uint32_t	nonce_reset_incr_le;
 	char		local_sk_hex[(crypto_box_SECRETKEYBYTES * 2) + 1] = {'\0'};
 	char		local_port[6] = {'\0'};
@@ -97,8 +99,10 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		role, sizeof(role), "net-gw"},
 		{"tunnel device", "device:", sizeof("device:"),
 		tunnel_device, sizeof(tunnel_device), "tun0"},
-		{"stats prefix", "stats_prefix:", sizeof("stats_prefix:"),
-		vpn->stats_prefix, sizeof(vpn->stats_prefix), "<hostname>"},
+		{"stats_path", "stats_path:", sizeof("stats_path:"),
+		stats_path, sizeof(stats_path), "/var/run/vpnd_stats.sock"},
+		{"label", "label:", sizeof("label:"),
+		vpn->label, sizeof(vpn->label), "<hostname>"},
 		{"local secret key", "local_sk:", sizeof("local_sk:"),
 		local_sk_hex, sizeof(local_sk_hex), NULL},
 		{"local port", "local_port:", sizeof("local_port:"),
@@ -145,8 +149,6 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 	struct addrinfo *local_addrinfo = NULL;
 	char		local_info[INET6_ADDRSTRLEN + 7];
 	struct addrinfo *remote_addrinfo = NULL;
-	struct sockaddr_un stats_addr;
-	char           *stats_path = "/var/run/vpnd_stats.sock";
 
 	setlinebuf(stdout);
 
@@ -207,7 +209,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		 * 
 		 * local_network: require in host gateway role.
 		 * 
-		 * stats_prefix: let the default be the hostname, which must be
+		 * label: let the default be the hostname, which must be
 		 * computed and hence cannot be hardcoded into the array of
 		 * config parameters
 		 */
@@ -224,7 +226,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 						log_msg(vpn, LOG_ERR, "%s not specified", c[i].desc);
 					}
 				} else {
-					if (strcmp(c[i].name, "stats_prefix:") == 0) {
+					if (strcmp(c[i].name, "label:") == 0) {
 						gethostname(c[i].value, c[i].value_sz);
 						for (j = 0; j < c[i].value_sz; j++) {
 							if (c[i].value[j] == '.')

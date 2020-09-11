@@ -95,7 +95,10 @@ Configuration file. If not specified, defaults to
 .Pa tun0
 .
 
-.It stats_prefix Ta Prefix to use for Graphite data. Defaults to value from
+.It stats_path Ta Path to Graphite statistics socket. Defaults to
+.Pa /var/run/vpnd_stats.sock
+
+.It label Ta Label to use as a prefix for Graphite data and log messages. Defaults to value from
 .Xr gethostname 3.
 
 .It local_sk Ta The local secret key. Required. Use value produced by

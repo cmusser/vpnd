@@ -3,7 +3,6 @@
 #include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <sys/sysctl.h>
 #include <sys/timerfd.h>
 
 #include <net/if.h>

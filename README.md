@@ -108,7 +108,8 @@ per line, in the following format:
 |---|---|---|
 |role|The networking role to assume: `net-gw`, `host-gw`, or `host`. These roles are explained above|no, defaults to `net-gw`|
 |device|The tunnel device name  |no, defaults to `tun0`.|
-|stats_prefix|prefix to use for Graphite data  |no, defaults to value from`gethostname(3)`.|
+|stats_path|path to Graphite statistics socket|no, defaults to `/var/run/vpnd_stats.sock`.|
+|label|label to use as a prefix for Graphite data and log messages.|no, defaults to value from `gethostname(3)`.|
 |local_sk|The local secret key|yes, use values from `vpnd-keygen` program.|
 |local_port|local UDP port to listen on|no, defaults to 4706.|
 |remote_pk|The peer's public key|yes, use values from `vpnd-keygen` program|

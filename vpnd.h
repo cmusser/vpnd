@@ -20,7 +20,7 @@
 
 #include "uthash.h"
 
-#define VPND_VERSION "1.1.8"
+#define VPND_VERSION "1.2.0"
 
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
 
@@ -283,7 +283,7 @@ struct vpn_state {
 	unsigned char	remote_network[sizeof(struct in6_addr)];
 	struct vpn_peer_info tx_peer_info;
 	struct vpn_peer_info rx_peer_info;
-	char		stats_prefix[64];
+	char		label[64];
 	unsigned char	orig_shared_key[crypto_box_BEFORENMBYTES];
 	unsigned char	cur_shared_key[crypto_box_BEFORENMBYTES];
 	struct timespec	key_start_ts;

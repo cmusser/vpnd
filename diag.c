@@ -45,7 +45,7 @@ log_msg(struct vpn_state *vpn, int priority, const char *msg,...)
 			localtime_r(&now, &now_tm);
 			strftime(timestamp_str, sizeof(timestamp_str), "%c", &now_tm);
 			vsnprintf(msg_str, sizeof(msg_str), msg, ap);
-			printf("%s %s\n", timestamp_str, msg_str);
+			printf("%s %s %s\n", timestamp_str, vpn->label, msg_str);
 		}
 	} else {
 		vsyslog(priority, msg, ap);
@@ -216,13 +216,29 @@ tx_graphite_stats(struct vpn_state *vpn, int client_fd)
 {
 	time_t		n;
 	long long	now;
+	struct timespec monotonic_now;
+	time_t		cur_sess_secs;
 	char		stats_buf [2048];
 
 	time(&n);
 	now = (long long)n;
+
+	switch(vpn->state) {
+	case MASTER_KEY_STALE:
+	case SLAVE_KEY_SWITCHING:
+	case MASTER_KEY_READY:
+	case ACTIVE_MASTER:
+	case ACTIVE_SLAVE:
+		get_cur_monotonic(&monotonic_now);
+		cur_sess_secs = monotonic_now.tv_sec - vpn->sess_start_ts.tv_sec;
+		break;
+	default:
+		cur_sess_secs = 0;
+	}
 	snprintf(stats_buf, sizeof(stats_buf),
 	    "%s.vpnd.keys %" PRIu32 " %lld\n"
 	    "%s.vpnd.sessions %" PRIu32 " %lld\n"
+	    "%s.vpnd.cur_sess_secs %" PRIi64 " %lld\n"
 	    "%s.vpnd.rx.data_bytes %" PRIu32 " %lld\n"
 	    "%s.vpnd.tx.data_bytes %" PRIu32 " %lld\n"
 	    "%s.vpnd.rx.packets %" PRIu32 " %lld\n"
@@ -235,20 +251,21 @@ tx_graphite_stats(struct vpn_state *vpn, int client_fd)
 	    "%s.vpnd.key_switch_start_retransmits %" PRIu32 " %lld\n"
 	    "%s.vpnd.key_ack_retransmits %" PRIu32 " %lld\n"
 	    "%s.vpnd.key_ready_retransmits %" PRIu32 " %lld\n",
-	    vpn->stats_prefix, vpn->keys_used, now,
-	    vpn->stats_prefix, vpn->sess_starts, now,
-	    vpn->stats_prefix, vpn->rx_data_bytes, now,
-	    vpn->stats_prefix, vpn->tx_data_bytes, now,
-	    vpn->stats_prefix, vpn->rx_packets, now,
-	    vpn->stats_prefix, vpn->tx_packets, now,
-	    vpn->stats_prefix, vpn->rx_late_packets, now,
-	    vpn->stats_prefix, cur_key_late_packets(vpn), now,
-	    vpn->stats_prefix, vpn->bad_nonces, now,
-	    vpn->stats_prefix, vpn->decrypt_failures, now,
-	    vpn->stats_prefix, vpn->peer_init_retransmits, now,
-	    vpn->stats_prefix, vpn->key_switch_start_retransmits, now,
-	    vpn->stats_prefix, vpn->key_switch_ack_retransmits, now,
-	    vpn->stats_prefix, vpn->key_ready_retransmits, now);
+	    vpn->label, vpn->keys_used, now,
+	    vpn->label, vpn->sess_starts, now,
+	    vpn->label, cur_sess_secs, now,
+	    vpn->label, vpn->rx_data_bytes, now,
+	    vpn->label, vpn->tx_data_bytes, now,
+	    vpn->label, vpn->rx_packets, now,
+	    vpn->label, vpn->tx_packets, now,
+	    vpn->label, vpn->rx_late_packets, now,
+	    vpn->label, cur_key_late_packets(vpn), now,
+	    vpn->label, vpn->bad_nonces, now,
+	    vpn->label, vpn->decrypt_failures, now,
+	    vpn->label, vpn->peer_init_retransmits, now,
+	    vpn->label, vpn->key_switch_start_retransmits, now,
+	    vpn->label, vpn->key_switch_ack_retransmits, now,
+	    vpn->label, vpn->key_ready_retransmits, now);
 	write(client_fd, stats_buf, strlen(stats_buf));
 
 }
