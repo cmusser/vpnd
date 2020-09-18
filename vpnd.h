@@ -20,7 +20,7 @@
 
 #include "uthash.h"
 
-#define VPND_VERSION "1.2.0"
+#define VPND_VERSION "1.3.0"
 
 #define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
 
@@ -266,7 +266,7 @@ struct late_nonce {
 /* Finite state machine state data. */
 struct vpn_state {
 	int		log_upto;
-	bool		foreground;
+	bool		background;
 	vpn_role	role;
 	vpn_state	state;
 	char		tun_name  [8];

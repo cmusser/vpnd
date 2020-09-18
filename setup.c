@@ -70,7 +70,7 @@ get_value(char *line, size_t len)
 }
 
 bool
-init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config_fname)
+init(struct vpn_state *vpn, int verbose, bool daemon_mode, char *prog_name, char *config_fname)
 {
 	bool		ok = true;
 	FILE           *config_file;
@@ -154,7 +154,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 
 	bzero(vpn, sizeof(struct vpn_state));
 
-	switch (vflag) {
+	switch (verbose) {
 	case 0:
 		vpn->log_upto = LOG_NOTICE;
 		break;
@@ -165,11 +165,11 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 		vpn->log_upto = LOG_DEBUG;
 	}
 
-	if (fflag) {
-		vpn->foreground = true;
+	if (daemon_mode) {
+		vpn->background = true;
 	} else {
 		char           *ident;
-		vpn->foreground = false;
+		vpn->background = false;
 		ident = strrchr(prog_name, '/');
 		if (!ident)
 			ident = prog_name;
@@ -493,7 +493,7 @@ init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config
 					strerror(errno));
 			}
 		}
-		ok = init_event_processing(vpn, fflag);
+		ok = init_event_processing(vpn, daemon_mode);
 
 		if (ok) {
 			generate_peer_id(vpn);

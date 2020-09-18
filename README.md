@@ -100,7 +100,7 @@ per line, in the following format:
 |---|---|---|
 |`-v`| verbosity level|Specify once for NOTICE level verbosity, multiple times for DEBUG|
 |`-V`| display version, then exit|
-|`-f`| foreground mode|Run in foreground. The default is to run as a daemon|
+|`-d`| daemon mode|Run in the background as a daemon. The default is to run in the foreground|
 |`-c`| configuration file|Name of configuration file. The default is `/etc/vpnd.conf`|
 
 ### Configuration File Parameters

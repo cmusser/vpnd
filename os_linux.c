@@ -52,7 +52,7 @@ open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 }
 
 bool
-init_event_processing(struct vpn_state *vpn, bool stdin_events)
+init_event_processing(struct vpn_state *vpn, bool daemon_mode)
 {
 	bool		ok = true;
 	struct epoll_event ev;
@@ -134,7 +134,8 @@ init_event_processing(struct vpn_state *vpn, bool stdin_events)
 				"to event set: %s", strerror(errno));
 		}
 	}
-	if (ok && stdin_events) {
+	// Only monitor stdin if in foreground.
+	if (ok && !daemon_mode) {
 		stdin_fd = fileno(stdin);
 		bzero(&ev, sizeof(ev));
 		ev.events = EPOLLIN;

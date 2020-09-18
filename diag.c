@@ -39,7 +39,9 @@ log_msg(struct vpn_state *vpn, int priority, const char *msg,...)
 	char		msg_str   [1024];
 
 	va_start(ap, msg);
-	if (vpn->foreground) {
+	if (vpn->background) {
+		vsyslog(priority, msg, ap);
+	} else {
 		if (priority <= vpn->log_upto) {
 			time(&now);
 			localtime_r(&now, &now_tm);
@@ -47,8 +49,6 @@ log_msg(struct vpn_state *vpn, int priority, const char *msg,...)
 			vsnprintf(msg_str, sizeof(msg_str), msg, ap);
 			printf("%s %s %s\n", timestamp_str, vpn->label, msg_str);
 		}
-	} else {
-		vsyslog(priority, msg, ap);
 	}
 	va_end(ap);
 }

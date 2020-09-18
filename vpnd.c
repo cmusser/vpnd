@@ -5,6 +5,7 @@
 
 #include "os.h"
 #include "proto.h"
+#include "setup.h"
 
 #define VPND_CONF_FILENAME "/etc/vpnd.conf"
 
@@ -15,7 +16,7 @@ main(int argc, char *argv[])
 	const char     *opts;
 	int		ch;
 	int		vflag = 0;
-	bool		fflag = false;
+	bool		dflag = false;
 	struct vpn_state vpn;
 	char           *config_fname;
 
@@ -31,15 +32,15 @@ main(int argc, char *argv[])
 			printf("vpnd %s\n", VPND_VERSION);
 			exit(0);
 			break;
-		case 'f':
-			fflag = true;
+		case 'd':
+			dflag = true;
 			break;
 		case 'c':
 			config_fname = optarg;
 			break;
 		default:
 			fprintf(stderr, "usage: vpnd [-vVfc]\n");
-			fprintf(stderr, "  -f: foreground mode (default: run as a daemon)\n");
+			fprintf(stderr, "  -d: run as a daemon (default: run in foreground)\n");
 			fprintf(stderr, "  -v: verbosity (default: NOTICE; use once for\n");
 			fprintf(stderr, "      INFO, multiple times for DEBUG)\n");
 			fprintf(stderr, "  -V: display version, then exit\n");
@@ -48,8 +49,8 @@ main(int argc, char *argv[])
 		}
 	}
 
-	if (init(&vpn, vflag, fflag, argv[0], config_fname)) {
-		if (!fflag)
+	if (init(&vpn, vflag, dflag, argv[0], config_fname)) {
+		if (dflag)
 			daemon(0, 0);
 
 		return run(&vpn) ? EXIT_SUCCESS : EXIT_FAILURE;

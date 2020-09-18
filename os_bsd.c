@@ -105,7 +105,7 @@ open_tun_sock(struct vpn_state *vpn, char *tun_name_str)
 }
 
 bool
-init_event_processing(struct vpn_state *vpn, bool stdin_events)
+init_event_processing(struct vpn_state *vpn, bool daemon_mode)
 {
 	EV_SET(&vpn->kev_changes[0], vpn->ext_sock,
 	       EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
@@ -129,7 +129,8 @@ init_event_processing(struct vpn_state *vpn, bool stdin_events)
 	vpn->kev_change_count++;
 	signal(SIGTERM, SIG_IGN);
 
-	if (stdin_events) {
+	// If in foreground, also monitor stdin.
+	if (!daemon_mode) {
 		EV_SET(&vpn->kev_changes[6], STDIN_FILENO,
 		       EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, 0);
 		vpn->kev_change_count++;

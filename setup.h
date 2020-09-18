@@ -3,6 +3,6 @@
 
 #include "vpnd.h"
 
-bool		init(struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config_fname);
+bool		init(struct vpn_state *vpn, int verbose, bool daemon_mode, char *prog_name, char *config_fname);
 
 #endif				/* !_VPND_SETUP_H_ */

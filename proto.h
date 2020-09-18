@@ -12,7 +12,6 @@ struct vpn_msg {
 
 void		generate_peer_id(struct vpn_state *vpn);
 struct timespec	get_timeout_interval(struct vpn_state *vpn, timer_type ttype);
-bool		init      (struct vpn_state *vpn, int vflag, bool fflag, char *prog_name, char *config_fname);
 void		return_to_init_state(struct vpn_state *vpn);
 void		change_state(struct vpn_state *vpn, vpn_state new_state);
 bool		tx_encrypted(struct vpn_state *vpn, struct vpn_msg *msg, size_t data_len);

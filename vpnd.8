@@ -71,9 +71,8 @@ Verbosity level. Specify once for NOTICE level verbosity, multiple times for DEB
 .It Fl V
 Display version, then exit
 .It Fl f
-Run in the foreground. Warning messages are generated to standard error
-instead of
-.Xr syslog 3 . The default is to run as a daemon.
+Run in the background as a daemon. Messages are sent to
+.Xr syslog 3 . instead of stderr. The default is to run in the foreground.
 .It Fl c
 Configuration file. If not specified, defaults to
 .Pa /etc/vpnd.conf
